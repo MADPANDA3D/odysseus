@@ -431,7 +431,10 @@ class ExtensionRegistry:
             try:
                 _strict_fields(
                     record,
-                    {"enabled", "manifest", "catalog_version", "effective_capabilities", "admitted_skills"},
+                    {
+                        "enabled", "manifest", "catalog_version", "effective_capabilities",
+                        "admitted_skills", "capability_inventory",
+                    },
                     "extension_registry_record_unknown_field",
                 )
                 manifest = validate_extension_manifest(record["manifest"])
@@ -498,6 +501,26 @@ class ExtensionRegistry:
                         raise ExtensionContractError("extension_registry_skill_invalid")
                 elif admitted_skills:
                     raise ExtensionContractError("extension_registry_skill_invalid")
+                capability_inventory = None
+                if record.get("capability_inventory") is not None:
+                    try:
+                        from src.extension_capability_inventory import (
+                            inventory_is_current,
+                            manifest_digest,
+                            validate_capability_inventory,
+                        )
+
+                        capability_inventory = validate_capability_inventory(
+                            record["capability_inventory"]
+                        )
+                        if not inventory_is_current(
+                            capability_inventory,
+                            source_revision=manifest["source"]["revision"],
+                            manifest_digest_value=manifest_digest(manifest),
+                        ):
+                            capability_inventory = None
+                    except ExtensionContractError:
+                        capability_inventory = None
                 extensions[extension_id] = {
                     "enabled": record["enabled"],
                     "manifest": manifest,
@@ -508,6 +531,7 @@ class ExtensionRegistry:
                     ),
                     "effective_capabilities": capabilities,
                     "admitted_skills": admitted_skills,
+                    "capability_inventory": capability_inventory,
                 }
             except (ExtensionContractError, KeyError, TypeError):
                 continue
@@ -531,6 +555,11 @@ class ExtensionRegistry:
             health_available=health_available,
         )
         extension_id = reconciled["manifest"]["extension_id"]
+        from src.extension_capability_inventory import build_capability_inventory
+
+        capability_inventory = build_capability_inventory(
+            reconciled, source_revision=reconciled["manifest"]["source"]["revision"]
+        )
         with self._lock:
             state = self._read()
             existing_names = {
@@ -548,6 +577,7 @@ class ExtensionRegistry:
                 "catalog_version": reconciled["catalog_version"],
                 "effective_capabilities": reconciled["capabilities"],
                 "admitted_skills": reconciled["admitted_skills"],
+                "capability_inventory": capability_inventory,
             }
             state["extensions"][extension_id] = record
             self._write(state)
@@ -600,6 +630,15 @@ class ExtensionRegistry:
             for extension_id, record in self._read()["extensions"].items()
             if extension_id in engaged and record.get("enabled")
         }
+
+    def capability_inventory(self, extension_id: str) -> dict[str, Any] | None:
+        """Revision-bound advisory inventory for one installed extension.
+
+        Present while disabled; never execution authority on its own. Tampered,
+        stale, or absent inventories return ``None``.
+        """
+        record = self._read()["extensions"].get(extension_id)
+        return record.get("capability_inventory") if record else None
 
     def snapshot(self) -> dict[str, Any]:
         return json.loads(json.dumps(self._read()))

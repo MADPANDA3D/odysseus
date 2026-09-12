@@ -1,11 +1,11 @@
 # Extension capability inventory, lazy mount, and static scan contracts
 
 Status: accepted architecture checkpoint for MAD-911 (M13 Extension Intake &
-Capability Discovery). MAD-912 persists the inventory, MAD-913 implements the
-agent query and lazy mount, MAD-914 implements the static scan pipeline, and
-MAD-915 adds the intake UI. Nothing in this document grants execution
-authority; the existing registry, installer, authority, and executor stay
-authoritative.
+Capability Discovery). MAD-911 defines these contracts and MAD-912 persists the
+inventory (both complete); MAD-913 implements the agent query and lazy mount,
+MAD-914 implements the static scan pipeline, and MAD-915 adds the intake UI.
+Nothing in this document grants execution authority; the existing registry,
+installer, authority, and executor stay authoritative.
 
 ## 1. Vocabulary and authority boundary
 
