@@ -234,10 +234,14 @@ async def test_binding_does_not_leak(ws, admin):
 def _sent_tool_names(monkeypatch, *, workspace):
     import asyncio
     import src.agent_loop as al
+    import src.context_budget as context_budget
 
     monkeypatch.setattr(al, "get_setting", lambda key, default=None: default, raising=False)
     monkeypatch.setattr(al, "get_mcp_manager", lambda: None, raising=False)
     monkeypatch.setattr(al, "estimate_tokens", lambda *a, **k: 10, raising=False)
+    # Keep a stable explicit budget so this exercises selection/routing, not
+    # catalog-cap arithmetic (the paged manage_settings schema grows over time).
+    monkeypatch.setattr(context_budget, "model_input_token_budget", lambda model: 8000, raising=False)
     # Isolate the selection logic from owner gating (tested separately).
     monkeypatch.setattr(al, "blocked_tools_for_owner", lambda owner: set(), raising=False)
 

@@ -178,3 +178,58 @@ def resolve_tool_mounts(
         "unknown_tools": sorted(unknown),
         "disabled_tools": sorted(blocked),
     }
+
+
+def catalog_page(
+    disabled: Iterable[str] = (),
+    *,
+    offset: int = 0,
+    limit: int = 20,
+    category: str = "",
+    search: str = "",
+) -> dict:
+    """One bounded, model-safe page of the built-in catalog (MAD-919).
+
+    The full catalog with descriptions is ~15k chars, but the tool-result
+    formatter only shows 8,000 chars of structured extras. Each page stays
+    comfortably under that budget so `list_tools` is always usable, and
+    `next_offset` lets the agent continue instead of hitting a dead end.
+    """
+    entries = catalog_entries(disabled=disabled)
+    category_key = str(category or "").strip().lower()
+    search_key = str(search or "").strip().lower()
+    if category_key:
+        entries = [
+            entry for entry in entries
+            if entry["category"].lower() == category_key
+        ]
+    if search_key:
+        entries = [
+            entry for entry in entries
+            if search_key in entry["id"].lower() or search_key in entry["description"].lower()
+        ]
+    total = len(entries)
+    offset = max(int(offset or 0), 0)
+    limit = min(max(int(limit or 20), 1), 50)
+    page = entries[offset:offset + limit]
+    compact = []
+    for entry in page:
+        description = entry.get("description") or ""
+        if len(description) > 100:
+            description = description[:99].rstrip() + "…"
+        compact.append({
+            "id": entry["id"],
+            "category": entry["category"],
+            "description": description,
+            "enabled": entry["enabled"],
+        })
+    consumed = offset + len(compact)
+    return {
+        "tools": compact,
+        "total": total,
+        "count": len(compact),
+        "offset": offset,
+        "next_offset": consumed if consumed < total else None,
+        "enabled_count": sum(1 for entry in entries if entry["enabled"]),
+        "categories": sorted({entry["category"] for entry in entries}),
+    }

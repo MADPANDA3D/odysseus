@@ -813,19 +813,55 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             }
 
             if action == "list_tools":
+                # MAD-919: page + filter the catalog. The un-paged dump exceeded
+                # the 8,000-char structured-result budget and arrived truncated
+                # mid-JSON, so every page must stay small and say how to continue.
                 current = get_setting("disabled_tools", []) or []
-                from src.tool_catalog import catalog_entries
-                entries = catalog_entries(disabled=current)
-                enabled_count = sum(1 for entry in entries if entry["enabled"])
+                from src.tool_catalog import catalog_page
+                try:
+                    offset = int(args.get("offset") or 0)
+                except (TypeError, ValueError):
+                    offset = 0
+                try:
+                    limit = int(args.get("limit") or 20)
+                except (TypeError, ValueError):
+                    limit = 20
+                page = catalog_page(
+                    disabled=current,
+                    offset=offset,
+                    limit=limit,
+                    category=str(args.get("category") or ""),
+                    search=str(args.get("search") or args.get("query") or ""),
+                )
+                shown_start = page["offset"] + 1 if page["count"] else page["offset"]
+                shown_end = page["offset"] + page["count"]
+                if page["next_offset"] is not None:
+                    position = (
+                        f"Showing {shown_start}-{shown_end} of {page['total']} "
+                        f"(continue with offset={page['next_offset']})"
+                    )
+                else:
+                    position = f"Showing {shown_start}-{shown_end} of {page['total']} (end)"
+                filters = []
+                if args.get("category"):
+                    filters.append(f"category={args['category']}")
+                if args.get("search") or args.get("query"):
+                    filters.append(f"search={args.get('search') or args.get('query')}")
+                filter_note = (" Filters: " + ", ".join(filters) + ".") if filters else ""
                 return {
                     "response": (
-                        f"{enabled_count}/{len(entries)} built-in tools enabled. "
-                        "Full catalog is in `tools` (id, category, description, enabled). "
+                        f"{position}.{filter_note} "
+                        f"{page['enabled_count']}/{page['total']} enabled in this view. "
+                        "Every catalog page is in `tools` (id, category, description, enabled). "
+                        f"Categories: {', '.join(page['categories'])}. "
                         f"Currently disabled: {', '.join(current) if current else '(none)'}."
                     ),
-                    "tools": entries,
-                    "count": len(entries),
-                    "enabled_count": enabled_count,
+                    "tools": page["tools"],
+                    "total": page["total"],
+                    "count": page["count"],
+                    "offset": page["offset"],
+                    "next_offset": page["next_offset"],
+                    "enabled_count": page["enabled_count"],
                     "disabled": list(current),
                     "exit_code": 0,
                 }
