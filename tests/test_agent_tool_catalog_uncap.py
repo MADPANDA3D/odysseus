@@ -159,14 +159,27 @@ def test_list_tools_returns_real_catalog():
         do_manage_settings(json.dumps({"action": "list_tools"}), owner=None)
     )
     assert result.get("exit_code") == 0
+    # MAD-919: the action returns one page; `total` is the full catalog size and
+    # paging with next_offset must cover every toggle exactly once.
+    assert result.get("total") == len(TOOL_TAGS)
     entries = result.get("tools") or []
-    ids = {entry.get("id") for entry in entries}
+    assert entries, result
+    for entry in entries:
+        assert {"id", "category", "description", "enabled"} <= set(entry), entry
+    ids = set()
+    offset = 0
+    while offset is not None:
+        page = asyncio.run(
+            do_manage_settings(
+                json.dumps({"action": "list_tools", "offset": offset, "limit": 50}),
+                owner=None,
+            )
+        )
+        ids.update(entry["id"] for entry in page.get("tools") or [])
+        offset = page.get("next_offset")
     assert ids == TOOL_TAGS, (
         "list_tools catalog must match the live toggle catalog; "
         f"missing={sorted(TOOL_TAGS - ids)}, extra={sorted(ids - TOOL_TAGS)}"
     )
-    assert result.get("count") == len(TOOL_TAGS)
-    for entry in entries:
-        assert {"id", "category", "description", "enabled"} <= set(entry), entry
     native = [entry for entry in entries if entry["id"] in _schema_names()]
     assert all(entry["description"] for entry in native), "native tools need descriptions"
