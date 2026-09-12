@@ -1198,6 +1198,16 @@
     <input type="checkbox" id="incognito-toggle" style="display:none;">
     <input type="file" id="file-input" class="hidden" multiple />
 
+    <!-- Agent working plan / todos (MAD-917): collapsible progress list the
+         agent maintains via update_plan while working through a task. -->
+    <div id="agent-plan-panel" class="agent-plan-panel" hidden>
+      <button type="button" class="agent-plan-header" id="agent-plan-toggle" aria-expanded="true" aria-controls="agent-plan-list" title="Collapse or expand the agent plan">
+        <span id="agent-plan-count" class="agent-plan-count">0 of 0 todos completed</span>
+        <svg class="agent-plan-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
+      </button>
+      <ul id="agent-plan-list" class="agent-plan-list" aria-label="Agent plan"></ul>
+    </div>
+
     <!-- Unified chat input bar -->
     <div class="chat-input-bar">
       <div class="chat-input-top">

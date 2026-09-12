@@ -43547,3 +43547,81 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 .project-item.project-unavailable .project-session-btn {
   pointer-events: none;
 }
+
+/* ── Agent working plan / todos (MAD-917) ─────────────────────────
+   Collapsible progress panel docked directly above the composer. It shows
+   the agent's own checklist from update_plan events — not the user Tasks. */
+.agent-plan-panel {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto 8px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.agent-plan-panel[hidden] { display: none; }
+.agent-plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-plan-header:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.agent-plan-count { opacity: 0.85; }
+.agent-plan-chevron {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+.agent-plan-panel.collapsed .agent-plan-chevron { transform: rotate(180deg); }
+.agent-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 2px 12px 10px;
+  list-style: none;
+  max-height: min(34vh, 260px);
+  overflow-y: auto;
+}
+.agent-plan-panel.collapsed .agent-plan-list { display: none; }
+.agent-plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-left: calc(var(--plan-depth, 0) * 16px);
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--fg) 80%, transparent);
+}
+.agent-plan-item.is-done {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.agent-plan-item.is-active {
+  color: var(--fg);
+  font-weight: 600;
+}
+.agent-plan-check {
+  flex-shrink: 0;
+  width: 13px;
+  text-align: center;
+  opacity: 0.7;
+}
+.agent-plan-item.is-done .agent-plan-check { color: var(--green, #50fa7b); }
+.agent-plan-item.is-active .agent-plan-check { color: var(--red); }
+@media (max-width: 768px) {
+  .agent-plan-panel { margin: 0 0 6px; border-radius: 10px; }
+  .agent-plan-list { max-height: 26vh; }
+}

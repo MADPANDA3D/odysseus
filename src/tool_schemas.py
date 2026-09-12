@@ -524,7 +524,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Write back to the ACTIVE PLAN: mark steps done or revise them. Use this while executing an approved plan — after you finish a step, call update_plan with the full checklist and that step marked `- [x]`; when the user asks to change the plan, call it with the revised checklist. The user's docked plan window updates live. Pass the COMPLETE checklist every time (not a diff). No effect if there is no active plan.",
+            "description": "Publish your working plan for a multi-step task so the user can follow along. Use this for any task with three or more steps: call it once you know the steps, then again after finishing each step (mark it `- [x]`) and whenever the user asks to change the plan. Always pass the COMPLETE GitHub-style markdown checklist — one step per line, `- [ ]` pending and `- [x]` done — not a diff. The user sees a live todo panel above the composer that updates with each call.",
             "parameters": {
                 "type": "object",
                 "properties": {
