@@ -55,6 +55,7 @@ import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 import marketplaceModule from './js/marketplace.js';
 import updaterModule from './js/updater.js';
+import agentPlanModule from './js/agentPlan.js';
 
 initComposerLinks();
 
@@ -64,6 +65,7 @@ window.sessionModule = sessionModule;
 window.uiModule = uiModule;
 window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
+window.agentPlanModule = agentPlanModule;
 loadBrand();
 
 registerForegroundAction(FOREGROUND_ACTIONS.OPEN_CALENDAR, () => {
@@ -2073,6 +2075,7 @@ function initializeEventListeners() {
   setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
   try { workspaceModule.initWorkspace(); } catch (_) {}
   try { projectsModule.initProjects(); } catch (_) {}
+  try { agentPlanModule.initAgentPlan(); } catch (_) {}
   try { accessModeModule.initAccessMode(); } catch (_) {}
 
   // Document editor toggle (special: uses module panel, not a checkbox)

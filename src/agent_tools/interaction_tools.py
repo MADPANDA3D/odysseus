@@ -58,11 +58,12 @@ class AskUserTool:
 class UpdatePlanTool:
     async def execute(self, content, ctx):
         """
-        update_plan: the agent writes back to the active plan — tick an item done
-        or revise steps (e.g. when the user asks to change something). Pure UI
-        marker: returns a `plan_update` payload the agent loop turns into a
-        `plan_update` SSE event; the frontend replaces the stored plan and refreshes
-        the docked plan window. Does NOT end the turn.
+        update_plan: the agent publishes its working plan for a multi-step task —
+        tick an item done or revise the steps. Pure UI marker: returns a
+        `plan_update` payload the agent loop turns into a `plan_update` SSE
+        event; the frontend stores it per session and refreshes the collapsible
+        todo panel docked above the composer. Does NOT end the turn and does not
+        require plan mode.
         """
         raw = (content or "").strip()
         plan = ""
