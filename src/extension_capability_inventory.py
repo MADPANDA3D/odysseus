@@ -447,7 +447,7 @@ def redact_scan_evidence(text: Any, *, maximum: int = MAX_EVIDENCE_CHARS) -> str
         r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+", r"\1 <redacted>", value
     )
     value = re.sub(
-        r"(?i)\b(token|password|passwd|secret|api[_-]?key|authorization)\b\s*[:=]\s*[^\s,;'\"]+",
+        r"(?i)\b(token|password|passwd|secret|api[_-]?key|authorization)\b\s*[:=]\s*['\"]?[^\s,;'\"]+['\"]?",
         r"\1=<redacted>",
         value,
     )

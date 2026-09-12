@@ -24,6 +24,7 @@ from src.extension_installer import (
 )
 from src.extension_mcp_adapter import mcp_extension_adapter
 from src.extension_registry import ExtensionContractError
+from src.extension_scan import ExtensionScanError, get_scan, start_scan
 from src.extension_skill_adapter import SkillBundleAdapter
 from src.marketplace_catalog import (
     MarketplaceCatalogError,
@@ -72,6 +73,13 @@ class SourcePlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operation: str = Field(pattern=r"^(install|upgrade)$")
+    source_url: str = Field(min_length=1, max_length=2_048)
+    ref: str = Field(default="HEAD", min_length=1, max_length=200)
+
+
+class SourceScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     source_url: str = Field(min_length=1, max_length=2_048)
     ref: str = Field(default="HEAD", min_length=1, max_length=200)
 
@@ -336,6 +344,27 @@ def setup_extension_routes(
             )
         except (ExtensionLifecycleError, ExtensionContractError) as exc:
             raise _http_error(exc) from exc
+
+    @router.post("/scans", dependencies=[Depends(require_admin)])
+    async def start_source_scan(
+        payload: SourceScanRequest, owner: str = Depends(require_user)
+    ):
+        try:
+            return await asyncio.to_thread(
+                start_scan,
+                payload.source_url,
+                payload.ref,
+                operator_id=_operator(owner),
+            )
+        except ExtensionScanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc.code)) from exc
+
+    @router.get("/scans/{scan_id}", dependencies=[Depends(require_admin)])
+    async def get_source_scan(scan_id: str, owner: str = Depends(require_user)):
+        job = await asyncio.to_thread(get_scan, scan_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="extension_scan_not_found")
+        return job
 
     @router.post("/plans/lifecycle", dependencies=[Depends(require_admin)])
     async def preview_lifecycle_plan(
