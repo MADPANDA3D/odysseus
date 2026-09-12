@@ -32,7 +32,7 @@ from . import admin_tools as admin_tools
 from .admin_tools import (
     ADMIN_TOOL_HANDLERS,
     do_manage_endpoints, do_manage_mcp, do_manage_webhooks,
-    do_manage_tokens, do_manage_settings,
+    do_manage_tokens, do_manage_settings, do_manage_extensions,
 )
 
 TOOL_HANDLERS = {
@@ -89,6 +89,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "suggest_document",
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
+             "manage_extensions",
              "get_runtime_status", "start_agent_task", "read_agent_task", "search_jarvis_knowledge",
              "manage_notes", "manage_calendar", "read_calendar",
              "resolve_contact", "manage_contact",

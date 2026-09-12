@@ -26,7 +26,7 @@ from src.tools.system import (  # noqa: F401
 # here would re-enter the partially-initialized agent_tools package (circular).
 _ADMIN_TOOL_SYMBOLS = (
     "do_manage_endpoints", "do_manage_mcp", "do_manage_webhooks",
-    "do_manage_tokens", "do_manage_settings",
+    "do_manage_tokens", "do_manage_settings", "do_manage_extensions",
     "_MCP_DENIED_COMMANDS", "_validate_mcp_command", "_mcp_allowed_commands",
 )
 

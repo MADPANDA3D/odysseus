@@ -656,6 +656,9 @@ def _clamp_network_inspection_tools(
     # inspection turns — the allowlist stays authoritative there, and mounted
     # tools remain blocked by the clamp's prune tracking.
     allowed.discard("manage_settings")
+    # MAD-913: extension discovery/mount is likewise outside narrow network
+    # inspection turns.
+    allowed.discard("manage_extensions")
     for domain in domains:
         allowed.update(_DOMAIN_TOOL_MAP.get(domain, set()))
     allowed.update(preserved_readers or set())
@@ -815,6 +818,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_books": "- ```manage_books``` — Read the current user's private Books catalog or search indexed book text. Args (JSON): {\"action\":\"list|search\", \"query\":\"...\", \"limit\":5}. Use list for title/indexing/OCR status; use search for content and cite returned title/page. Never use filesystem tools or guessed paths for Books.",
     "manage_research": "- ```manage_research``` — List, read/open, or delete saved DEEP RESEARCH results from the Library. Args (JSON): {\"action\": \"list|read|delete\", \"id\": \"<id>\", \"search\": \"...\"}. `list` returns rows like `[query](#research-<id>) — N sources` MOST-RECENT FIRST; the user clicks to open. `read` (aliases: open/view/get) takes `id` and returns the report text + sources. Use when the user says \"open/read/find/delete my research\" or \"that report\". This IS how you read a finished report: when the user refers to a just-completed deep-research job (\"check it out\", \"read that report\", \"summarize the research\") WITHOUT giving an id, call `manage_research` with `action:list` to get the most-recent id, then `action:read` with that id, and answer from the returned text. Do NOT `web_fetch`/`app_api` the `/api/research/report/{id}` URL — that endpoint renders HTML for the browser, not clean text — and do NOT start a fresh `web_search`/`trigger_research` just to read an existing report. To START new research, use trigger_research instead.",
     "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks/notes/calendar/email), list the whole built-in catalog with categories, descriptions, and enabled state: `{\"action\":\"list_tools\"}` — inspect this before claiming a tool is missing or counting what you have. If the catalog lists a tool your prompt lacks, mount it for this request: `{\"action\":\"load_tools\",\"tools\":[\"grep\",\"generate_image\"]}` — the exact usage comes back in the result and the tool stays available for the rest of the request.",
+    "manage_extensions": "- ```manage_extensions``` — Inspect installed plugins/extensions and their capabilities WITHOUT activating them, then mount exactly what this request needs. Args (JSON): {\"action\":\"list\"} shows installed extensions with capability counts (works while disabled); {\"action\":\"inspect\",\"extension_id\":\"<id>\"} returns capability names/kinds/permission modes (advisory metadata, never schemas); {\"action\":\"mount\",\"names\":[\"<tool>\"]} loads those extension tools through the existing governed executor for the rest of this request. Use whenever the user asks what a plugin/extension can do. Disabled extensions are inspectable but not mountable; browser-surface extensions need their engaged UI.",
     "manage_notes": """\
 ```manage_notes
 {"action": "add", "title": "<short todo>", "due_date": "<natural language or ISO datetime>"}
@@ -3829,6 +3833,13 @@ async def stream_agent_loop(
                 _relevant_tools.update(tools)
         logger.info(f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
 
+    # MAD-913: the catalog and extension discovery/mount gateways must survive
+    # every selection path, including caller-provided allowlists. Without them
+    # in the selection the server-side action catalog can reject the very
+    # capability the model needs to discover or mount anything.
+    if _relevant_tools is not None:
+        _relevant_tools.update({"manage_settings", "manage_extensions"})
+
     # MAD-905: API engines mount the full built-in catalog. Intent clamps
     # below still prune tools they deliberately steer away from; track those
     # removals so "uncapped" never means "ignores a per-turn clamp".
@@ -4396,6 +4407,9 @@ async def stream_agent_loop(
     # MAD-907: tools mounted mid-request via manage_settings load_tools.
     # Kept front-of-line when the measured budget caps the catalog.
     _mounted_tools: Set[str] = set()
+    # MAD-913: extension tools mounted mid-request through manage_extensions.
+    # name -> {extension_id, permission_mode, descriptor, schema}
+    _mounted_extension_specs: Dict[str, Dict[str, Any]] = {}
     # Frequency of each exact call signature (tool + args), for the runaway
     # backstop. Counting identical repeats — not distinct same-tool calls —
     # lets a legit batch (e.g. 18 calendar events at once) through.
@@ -4550,6 +4564,8 @@ async def stream_agent_loop(
         # MAD-907: the discovery gateway must survive any budget cap so a
         # capped engine can always list and mount what it needs.
         _schema_priority.add("manage_settings")
+        # MAD-913: extension discovery/mount must survive the same cap.
+        _schema_priority.add("manage_extensions")
         _priority_order: List[str] = []
         if "ui_control" in _schema_priority:
             _priority_order.append("ui_control")
@@ -5658,6 +5674,28 @@ async def stream_agent_loop(
                             custom_result = await tool_executor(block, _push_progress)
                             if custom_result is not None:
                                 return custom_result
+                        # MAD-913: extension tools mounted this request execute
+                        # through the existing MCP extension adapter, which
+                        # re-reconciles the live catalog before every call.
+                        _extension_spec = _mounted_extension_specs.get(block.tool_type)
+                        if _extension_spec is not None:
+                            from src.extension_agent_mount import (
+                                execute_mounted_extension_tool,
+                            )
+
+                            try:
+                                _extension_args = json.loads(block.content or "{}")
+                            except json.JSONDecodeError:
+                                _extension_args = {}
+                            if not isinstance(_extension_args, dict):
+                                _extension_args = {}
+                            _extension_result = await execute_mounted_extension_tool(
+                                _extension_spec, _extension_args
+                            )
+                            return (
+                                f"Extension tool: {block.tool_type}",
+                                _extension_result,
+                            )
                         return await execute_tool_block(
                             block,
                             session_id=session_id,
@@ -5774,6 +5812,46 @@ async def stream_agent_loop(
                         logger.info(
                             "[tool-rag] mounted tools for the remainder of the request: %s",
                             sorted(_new_mounts),
+                        )
+
+            # MAD-913: `manage_extensions action=mount` results carry
+            # `mounted_extension_tools`. Register their schemas for the NEXT
+            # round and remember the owning extension so dispatch can route
+            # calls through the existing extension MCP adapter.
+            if _relevant_tools is not None and isinstance(result, dict):
+                _mounted_extension_raw = result.get("mounted_extension_tools")
+                if isinstance(_mounted_extension_raw, (list, tuple)):
+                    for _spec in _mounted_extension_raw:
+                        if not isinstance(_spec, Mapping):
+                            continue
+                        _ext_name = str(_spec.get("name") or "").strip()
+                        _ext_schema = _spec.get("schema")
+                        if (
+                            not _ext_name
+                            or not isinstance(_ext_schema, Mapping)
+                            or _ext_name in disabled_tools
+                            or _ext_name in _intent_pruned_tools
+                        ):
+                            continue
+                        _mounted_extension_specs[_ext_name] = dict(_spec)
+                        if not any(
+                            _existing.get("function", {}).get("name") == _ext_name
+                            for _existing in extra_tool_schemas
+                            if isinstance(_existing, Mapping)
+                        ):
+                            extra_tool_schemas.append(dict(_ext_schema))
+                        extension_capabilities[_ext_name] = {
+                            "extension_id": str(_spec.get("extension_id") or ""),
+                            "permission_mode": str(
+                                _spec.get("permission_mode") or "read_only"
+                            ),
+                        }
+                        _relevant_tools.add(_ext_name)
+                        _mounted_tools.add(_ext_name)
+                    if _mounted_extension_specs:
+                        logger.info(
+                            "[tool-rag] mounted extension tools for the remainder of the request: %s",
+                            sorted(_mounted_extension_specs),
                         )
 
             # Extract structured web sources from web_search tool output.

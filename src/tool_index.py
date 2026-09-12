@@ -46,6 +46,9 @@ ALWAYS_AVAILABLE = frozenset({
     # enabled catalog and `load_tools` mounts any entry for the rest of the
     # request, so no engine may silently lose access to its own toolset.
     "manage_settings",
+    # MAD-913: installed extensions must be inspectable without activation,
+    # and named extension tools must be mountable for the current request.
+    "manage_extensions",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -105,6 +108,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_books": "Read the authenticated owner's private Books library. action=list returns book title, filename, pages, indexing status, chunk count, and OCR/needs-attention state. action=search semantically searches full indexed book text and returns source title, page, chunk, and excerpt. Use for any 'my Books library', OCR/status, or book-content question. Never use grep, shell, filesystem paths, or manage_documents for Books.",
     "manage_research": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' (aka open/view/get) with id returns the report + sources. action='delete' with id removes it. Use this for ANY 'open/read/find/delete my research / that report / the research on X' request. NOTE: this is for EXISTING research; to START new research use trigger_research.",
     "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/vision/image/research models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools) and mounts any enabled built-in for the rest of the request (load_tools with tools=[...], returning its exact usage). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
+    "manage_extensions": "Inspect installed plugins/extensions and their capabilities WITHOUT activating them, then mount exactly the tools the request needs. action=list returns installed extensions with capability counts (works while disabled); action=inspect with extension_id returns capability names/kinds/permission modes (advisory metadata, never schemas); action=mount with names loads those extension tools through the existing governed executor for the rest of this request (schemas come back in the result). Use whenever the user asks what a plugin/extension can do.",
     "create_session": "Create a new chat with a name and model.",
     "list_sessions": "List all chats with their metadata (the UI calls these 'chats'). Use for 'list my chats', 'rename all my chats' (list first, then manage_session to rename each).",
     "send_to_session": "Send a message to another chat. Cross-chat communication.",

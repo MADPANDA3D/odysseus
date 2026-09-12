@@ -730,7 +730,7 @@ def _raw_openai_tool_call_to_block(value) -> Optional[ToolBlock]:
     elif tool_type in ("manage_tasks", "manage_skills", "api_call", "manage_endpoints",
                        "manage_mcp", "manage_webhooks", "manage_tokens",
                        "manage_documents", "manage_settings", "manage_notes",
-                       "manage_research", "manage_bg_jobs"):
+                       "manage_research", "manage_bg_jobs", "manage_extensions"):
         content = json.dumps(args)
     elif tool_type in ("get_workspace", "list_models"):
         content = args.get("filter", "") if tool_type == "list_models" else ""
