@@ -13,6 +13,12 @@ const WORKER_UPDATE_TIMEOUT_MS = 10000;
 // Covers the worker's eight bounded 5s status attempts, retry delays,
 // navigation grace, and normal install/activation overhead.
 const WORKER_ACTIVATION_TIMEOUT_MS = 60000;
+// Grace period after the replacement worker activates. The worker normally
+// navigates open clients from its activate handler; if that reconcile cannot
+// run (for example the terminal-status read fails during the restart window),
+// the page reloads itself after this window so a completed update can never
+// leave the app running the previous release.
+const WORKER_RECONCILE_FALLBACK_MS = 5000;
 const MODAL_ID = 'updater-modal';
 const RELOAD_REVISION_KEY = 'pandamonium:update-reload-revision';
 const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
@@ -443,7 +449,15 @@ async function refreshApplicationWorker() {
       }
       const candidate = registration.installing || registration.waiting;
       if (candidate || registration.active !== previousWorker) {
-        if (await waitForWorkerReplacement(registration, previousWorker)) return;
+        if (await waitForWorkerReplacement(registration, previousWorker)) {
+          // The replacement usually navigates this client from its activate
+          // handler (static/sw.js reconcileUpdateClients). That reconcile is
+          // skipped when the worker cannot read a terminal update status while
+          // the app restarts. Keep the page honest: if no navigation arrives
+          // within the grace window, reload it directly.
+          window.setTimeout(() => window.location.reload(), WORKER_RECONCILE_FALLBACK_MS);
+          return;
+        }
       }
     }
   } catch (_) {}
@@ -729,12 +743,22 @@ async function init() {
   } catch (_) {}
   navigator.serviceWorker?.addEventListener?.('message', event => {
     if (event.data?.type !== 'pandamonium-update-reconciled') return;
+    let wasPending = false;
     try {
       const url = new URL(window.location.href);
-      if (url.searchParams.get(WORKER_RECONCILE_QUERY) !== WORKER_UPDATE_PENDING) return;
-      url.searchParams.delete(WORKER_RECONCILE_QUERY);
-      window.history.replaceState(window.history.state, '', url);
+      wasPending = url.searchParams.get(WORKER_RECONCILE_QUERY) === WORKER_UPDATE_PENDING;
+      if (wasPending) {
+        url.searchParams.delete(WORKER_RECONCILE_QUERY);
+        window.history.replaceState(window.history.state, '', url);
+      }
     } catch (_) {}
+    // This page took the pending fallback load before the new worker was in
+    // control, so it may still be running the previous release's assets. The
+    // worker only confirms the install after the new release is live; reload
+    // once so the page is guaranteed to render the new build.
+    if (wasPending) {
+      window.setTimeout(() => window.location.reload(), 0);
+    }
   });
   el('sidebar-update-check')?.addEventListener('click', event => {
     openModal({

@@ -2940,10 +2940,11 @@ import { getSelectedAgentSelection } from './modelPicker.js';
 
               } else if (json.type === 'plan_update') {
                 if (_isBg) continue;
-                // Agent wrote back to the plan (ticked a step / revised). Update
-                // the stored plan + live-refresh the docked plan window.
+                // Agent wrote back to its working plan (ticked a step / revised).
+                // Store it per session and refresh the docked todo panel above
+                // the composer.
                 const _pu = (json.data && json.data.plan) ? json.data.plan : '';
-                if (_pu) _setStoredPlan(_pu);
+                if (_pu) window.agentPlanModule?.update?.(_pu, streamSessionId);
 
               } else if (json.type === 'agent_step') {
                 if (_isBg) continue;
