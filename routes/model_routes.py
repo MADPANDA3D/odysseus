@@ -458,7 +458,7 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("true", "1", "yes", "on")
 
 
-_ENDPOINT_KINDS = {"auto", "local", "api", "proxy"}
+_ENDPOINT_KINDS = {"auto", "local", "api", "proxy", "tailnet"}
 _REFRESH_MODES = {"auto", "manual", "disabled"}
 
 
@@ -495,7 +495,7 @@ def _endpoint_refresh_interval(ep: Any, category: str) -> float:
         val = 0
     if val > 0:
         return float(max(30, val))
-    return 60.0 if category == "local" else 3600.0
+    return 60.0 if category in ("local", "tailnet") else 3600.0
 
 
 def _endpoint_refresh_timeout(ep: Any, category: str) -> float:
@@ -508,8 +508,8 @@ def _endpoint_refresh_timeout(ep: Any, category: str) -> float:
         return float(max(1, min(60, val)))
     # llama.cpp and other local OpenAI-compatible servers can block briefly
     # while warming/loading. A 2s local timeout makes working endpoints flicker
-    # offline before /v1/models is ready.
-    return 10.0 if category == "local" else 2.0
+    # offline before /v1/models is ready. Tailnet nodes behave like local.
+    return 10.0 if category in ("local", "tailnet") else 2.0
 
 
 def _manual_refresh_timeout(ep: Any, category: str, requested: Any = None) -> float:
@@ -522,7 +522,7 @@ def _manual_refresh_timeout(ep: Any, category: str, requested: Any = None) -> fl
     if requested_val is not None:
         return float(requested_val)
     stored = _parse_positive_int(getattr(ep, "model_refresh_timeout", None), minimum=1, maximum=60)
-    if category == "local":
+    if category in ("local", "tailnet"):
         return float(stored) if stored is not None else _endpoint_refresh_timeout(ep, category)
     return float(max(stored or 30, 30))
 
@@ -576,7 +576,7 @@ def _explicit_model_list_timeout(base_url: str, endpoint_kind: str = "auto", req
     category = _classify_endpoint(base_url, kind)
     if kind in ("api", "proxy") or category == "api":
         return 30.0
-    return 15.0 if category == "local" else (3.0 if _is_ollama_base(base_url) else 2.0)
+    return 15.0 if category in ("local", "tailnet") else (3.0 if _is_ollama_base(base_url) else 2.0)
 
 
 def _cached_model_ids(ep: Any) -> List[str]:
@@ -785,12 +785,15 @@ def _local_ip_literal(host: str) -> bool:
 
 
 def _classify_endpoint(base_url: str, endpoint_kind: str = "auto") -> str:
-    """Return 'local' if the endpoint URL points to a private/local address, else 'api'.
+    """Return 'local' if the endpoint URL points to a private/local address, 'tailnet'
+    for explicitly registered tailnet nodes, else 'api'.
     Includes the Tailscale CGNAT range (100.64.0.0/10) so tailnet-hosted
     servers (e.g. Cookbook serve endpoints) get reachability-probed too."""
     kind = _normalize_endpoint_kind(endpoint_kind)
     if kind == "local":
         return "local"
+    if kind == "tailnet":
+        return "tailnet"
     if kind in ("api", "proxy"):
         return "api"
     try:
@@ -1879,6 +1882,8 @@ def setup_model_routes(model_discovery):
         request: Request,
         name: str = Form(""),
         base_url: str = Form(...),
+        tailnet_peer_id: str = Form(""),
+        tailnet_port: str = Form(""),
         api_key: str = Form(""),
         skip_probe: str = Form("false"),
         require_models: str = Form("false"),
@@ -1897,6 +1902,21 @@ def setup_model_routes(model_discovery):
     ):
         require_admin(request)
         base_url = _normalize_base(base_url)
+        # Tailnet registration: the browser only ever holds the opaque peer id
+        # issued by /api/discover?mode=tailnet_peers. The address is resolved
+        # server-side here, after the operator's explicit scan + selection.
+        tailnet_peer_id = (tailnet_peer_id or "").strip()
+        tailnet_port = (tailnet_port or "").strip()
+        if tailnet_peer_id or tailnet_port:
+            if not (tailnet_peer_id and tailnet_port):
+                raise HTTPException(400, "Tailnet peer selection is incomplete")
+            if model_discovery is None:
+                raise HTTPException(400, "Tailnet discovery is unavailable")
+            try:
+                base_url = model_discovery.resolve_tailnet_candidate(tailnet_peer_id, tailnet_port)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            endpoint_kind = "tailnet"
         if not base_url:
             raise HTTPException(400, "Base URL is required")
         model_type = normalize_model_endpoint_type(model_type or "llm")
