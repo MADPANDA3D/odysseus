@@ -1163,6 +1163,18 @@ async def _startup_event():
             _db.close()
     except Exception as e:
         logger.debug(f"Incognito purge skipped: {e}")
+    # MAD-920: convert legacy chat folder names into real projects exactly once
+    # so the sidebar's Projects group is backed by the project registry.
+    try:
+        from src import project_registry
+        _migration = await asyncio.to_thread(project_registry.migrate_session_folders)
+        if _migration.get("migrated") or _migration.get("bound"):
+            logger.info(
+                "Projects migration: created %s project(s), bound %s session(s)",
+                _migration.get("migrated"), _migration.get("bound"),
+            )
+    except Exception as e:
+        logger.warning(f"Session-folder project migration skipped: {e}")
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])
