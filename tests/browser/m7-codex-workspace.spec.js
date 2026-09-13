@@ -55,13 +55,14 @@ function taskPage(cursor = null) {
   };
 }
 
-async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat = null, onHistory = null, pinned = [], preferences = {} } = {}) {
+async function mockShell(page, { sessions = [], projects = [], catalog = projectCatalog, onChat = null, onHistory = null, pinned = [], preferences = {} } = {}) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/selector-catalog') return route.fulfill({ json: selector });
     if (url.pathname === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
     if (url.pathname === '/api/models') return route.fulfill({ json: { items: [] } });
     if (url.pathname === '/api/default-chat') return route.fulfill({ json: {} });
+    if (url.pathname === '/api/projects') return route.fulfill({ json: { projects, root: '/data/projects' } });
     if (url.pathname === '/api/sessions') return route.fulfill({ json: sessions });
     if (url.pathname === '/api/session' && route.request().method() === 'POST') return route.fulfill({ json: { id: 'friday-chat' } });
     if (url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
@@ -211,17 +212,18 @@ test('chat project folders ripple their direct rows when collapsed and expanded'
   const now = new Date().toISOString();
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const sessions = [
-    { id: 'folder-now', name: 'Current project chat', model: 'fixture', archived: false, folder: 'Home Lab', agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
-    { id: 'folder-old', name: 'Earlier project chat', model: 'fixture', archived: false, folder: 'Home Lab', agent_target: 'jarvis', created_at: yesterday, updated_at: yesterday, last_message_at: yesterday },
+    { id: 'folder-now', name: 'Current project chat', model: 'fixture', archived: false, project_id: 'p-home', agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
+    { id: 'folder-old', name: 'Earlier project chat', model: 'fixture', archived: false, project_id: 'p-home', agent_target: 'jarvis', created_at: yesterday, updated_at: yesterday, last_message_at: yesterday },
     { id: 'unfiled-now', name: 'Current unfiled chat', model: 'fixture', archived: false, agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
   ];
+  const projects = [{ id: 'p-home', name: 'Home Lab', path: '/work/home-lab', resolved_path: '/work/home-lab', available: true, reason: '' }];
   await page.addInitScript(() => localStorage.setItem('lastSessionId', 'folder-now'));
-  await mockShell(page, { sessions });
+  await mockShell(page, { sessions, projects });
   await page.goto('/static/index.html');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(3);
 
-  const assertFolderRipple = async (folderName) => {
-    const folder = page.locator(`.session-folder[data-folder-key="${folderName}"]`);
+  const assertFolderRipple = async (projectId) => {
+    const folder = page.locator(`.session-folder[data-project-id="${projectId}"]`);
     const header = folder.locator(':scope > .session-folder-header');
     const rows = folder.locator(':scope > .session-folder-content > :is(.date-section-header, .list-item)');
 
@@ -240,18 +242,18 @@ test('chat project folders ripple their direct rows when collapsed and expanded'
     ))).toContain('section-domino-in');
   };
 
-  await assertFolderRipple('Home Lab');
+  await assertFolderRipple('p-home');
   await expect(page.locator('#session-list .unsorted-folder')).toHaveCount(0);
   await expect(page.locator('#session-list .session-unfiled-region')).toContainText('Current unfiled chat');
 
-  const homeLab = page.locator('.session-folder[data-folder-key="Home Lab"]');
+  const homeLab = page.locator('.session-folder[data-project-id="p-home"]');
   await homeLab.locator(':scope > .session-folder-header').click();
   await expect(homeLab).toHaveClass(/session-folder-just-collapsing/);
   await homeLab.locator(':scope > .session-folder-header').click();
   await expect(homeLab).toHaveClass(/session-folder-just-expanded/);
   await expect(homeLab.locator(':scope > .session-folder-content')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (
-    JSON.parse(localStorage.getItem('odysseus-folder-state') || '{}')['Home Lab']
+    JSON.parse(localStorage.getItem('odysseus-folder-state') || '{}')['p-home']
   ))).toBe(true);
 });
 
@@ -259,13 +261,14 @@ test('Chats stay agent-scoped while pinned chats and project folders keep their 
   const now = new Date().toISOString();
   const sessions = [
     { id: 'jarvis-pin', name: 'Pinned Jarvis chat', model: 'fixture', archived: false, is_important: true, agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
-    { id: 'jarvis-project', name: 'Project Jarvis chat', model: 'fixture', archived: false, folder: 'Home Lab', agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
+    { id: 'jarvis-project', name: 'Project Jarvis chat', model: 'fixture', archived: false, project_id: 'p-home', agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
     { id: 'jarvis-chat', name: 'Regular Jarvis chat', model: 'fixture', archived: false, agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
     { id: 'gordon-chat', name: 'Gordon chat', model: 'fixture', archived: false, agent_target: 'hermes', created_at: now, updated_at: now, last_message_at: now },
     { id: 'friday-chat', name: 'Friday chat', model: 'fixture', archived: false, agent_target: 'pc-codex', created_at: now, updated_at: now, last_message_at: now },
   ];
+  const projects = [{ id: 'p-home', name: 'Home Lab', path: '/work/home-lab', resolved_path: '/work/home-lab', available: true, reason: '' }];
   await page.addInitScript(() => localStorage.setItem('lastSessionId', 'jarvis-chat'));
-  await mockShell(page, { sessions });
+  await mockShell(page, { sessions, projects });
   await page.goto('/static/index.html');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(5);
 
@@ -279,7 +282,7 @@ test('Chats stay agent-scoped while pinned chats and project folders keep their 
   await expect(page.locator('#chats-section-label')).toHaveText('Chats');
   await expect(page.locator('#session-list .sidebar-nav-label')).toHaveText(['Pinned', 'Projects']);
   await expect(page.locator('#session-list')).toContainText('Pinned Jarvis chat');
-  await expect(page.locator('#session-list .session-folder-header[data-folder-name="Home Lab"]')).toContainText('Home Lab');
+  await expect(page.locator('#session-list .session-folder-header[data-project-id="p-home"]')).toContainText('Home Lab');
   await expect(page.locator('#session-list')).not.toContainText('Gordon chat');
 
   await activate('gordon-chat');

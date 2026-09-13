@@ -204,6 +204,35 @@ def _persist_session_agent_target(session_id: str, target: str) -> None:
         db.close()
 
 
+def _validate_project_id(project_id: str) -> str:
+    """Normalize a project binding: '' clears it, a real id passes, else 400."""
+    from src import project_registry
+
+    wanted = str(project_id or "").strip()
+    if not wanted:
+        return ""
+    if project_registry.get_project(wanted) is None:
+        raise HTTPException(400, "Project no longer exists")
+    return wanted
+
+
+def _persist_session_project(session_id: str, project_id: str) -> None:
+    """Persist or clear the project binding for a session (MAD-920)."""
+    db = SessionLocal()
+    try:
+        db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
+        if not db_session:
+            raise HTTPException(404, f"Session {session_id} not found")
+        db_session.project_id = project_id or None
+        db_session.updated_at = utcnow_naive()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 _HIDDEN_SYSTEM_SESSION_NAMES = {
     "[Task] Chat Sessions Tidy",
     "[Task] Documents Tidy",
@@ -290,6 +319,7 @@ def setup_session_routes(
         db = SessionLocal()
         try:
             folder_map = {}
+            project_map = {}
             token_map = {}
             important_map = {}
             created_map = {}
@@ -298,11 +328,12 @@ def setup_session_routes(
             mode_map = {}
             msg_count_map = {}
             agent_target_map = {}
-            q = db.query(DbSession.id, DbSession.folder, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count, DbSession.agent_target).filter(DbSession.archived == False)
+            q = db.query(DbSession.id, DbSession.folder, DbSession.project_id, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count, DbSession.agent_target).filter(DbSession.archived == False)
             q = owner_filter(q, DbSession, user)
             rows = q.all()
             for row in rows:
                 folder_map[row.id] = row.folder
+                project_map[row.id] = row.project_id
                 token_map[row.id] = (row.total_input_tokens or 0) + (row.total_output_tokens or 0)
                 important_map[row.id] = row.is_important or False
                 created_map[row.id] = row.created_at.isoformat() if row.created_at else None
@@ -341,6 +372,7 @@ def setup_session_routes(
         sessions = [{"id": s.id, "name": s.name, "model": _public_model(s.name, s.model),
                      "endpoint_url": s.endpoint_url, "rag": s.rag,
                      "archived": s.archived, "folder": folder_map.get(s.id),
+                     "project_id": project_map.get(s.id),
                      "total_tokens": token_map.get(s.id, 0),
                      "is_important": important_map.get(s.id, False),
                      "created_at": created_map.get(s.id),
@@ -369,6 +401,7 @@ def setup_session_routes(
         api_key: str = Form(""),
         endpoint_id: str = Form(""),
         agent_target: str = Form(None),
+        project_id: str = Form(None),
     ):
         skip_val = str(skip_validation).lower() == "true"
         user = effective_user(request)
@@ -456,6 +489,7 @@ def setup_session_routes(
                 model_to_use = found
         
         target = _validated_session_agent_target(agent_target)
+        resolved_project_id = _validate_project_id(project_id)
         sid = str(uuid.uuid4())
         user = effective_user(request)
         session = session_manager.create_session(
@@ -468,6 +502,8 @@ def setup_session_routes(
         )
         _persist_session_agent_target(sid, target)
         session.agent_target = target
+        if resolved_project_id:
+            _persist_session_project(sid, resolved_project_id)
         # Set auth headers for custom API-key endpoints
         resolved_key = request_api_key
         resolved_base = endpoint_url
@@ -501,6 +537,7 @@ def setup_session_routes(
         model: str = Form(None), endpoint_url: str = Form(None),
         endpoint_id: str = Form(None),
         agent_target: str = Form(None),
+        project_id: str = Form(None),
     ):
         _verify_session_owner(request, sid)
         try:
@@ -528,6 +565,11 @@ def setup_session_routes(
             _persist_session_agent_target(sid, target)
             session.agent_target = target
             result["agent_target"] = target
+        # Update project binding (MAD-920). Empty string clears the binding.
+        if project_id is not None:
+            normalized_project = _validate_project_id(project_id)
+            _persist_session_project(sid, normalized_project)
+            result["project_id"] = normalized_project or None
         # Switch model/endpoint mid-session
         if model is not None and endpoint_url is not None:
             user = effective_user(request)
@@ -1099,6 +1141,7 @@ def setup_session_routes(
                 rows_q = rows_q.filter(DbSession.owner == user)
             rows = rows_q.limit(2000).all()
             folder_map = {r.id: r.folder for r in rows}
+            project_map = {r.id: r.project_id for r in rows}
             # Precompute per-session message counts in TWO aggregate queries
             # instead of 1–3 queries PER session — with many chats the per-row
             # loop was doing thousands of round-trips and blowing the timeout.
@@ -1171,25 +1214,26 @@ def setup_session_routes(
                 "status": "ok",
                 "updated": 0,
                 "folders": [],
+                "projects": [],
                 "deleted_empty": deleted_empty,
                 "deleted_throwaway": deleted_throwaway,
                 "unfiled_remaining": 0,
                 "skipped_llm": True,
             }
 
-        # Tidy works in batches: only sessions that don't already have a
-        # folder, capped at TIDY_BATCH_SIZE (most recent first). Sending
-        # all 100+ chats to one LLM call blows the context window, makes
-        # the request slow, and re-bills the same tokens every click for
-        # already-sorted chats. Skipping sessions with `current_folder`
-        # means each Tidy press only handles new unfiled chats.
+        # Tidy works in batches: only chats that are not already bound to a
+        # project, capped at TIDY_BATCH_SIZE (most recent first). Sending all
+        # 100+ chats to one LLM call blows the context window, makes the
+        # request slow, and re-bills the same tokens every click for
+        # already-organized chats. Skipping bound sessions means each Tidy
+        # press only handles new unfiled chats.
         TIDY_BATCH_SIZE = 15
         all_candidates = []
         for s in user_sessions.values():
             if s.archived or s.name == "Incognito":
                 continue
-            if folder_map.get(s.id):
-                # Already in a folder — skip on this pass.
+            if project_map.get(s.id):
+                # Already bound to a project — skip on this pass.
                 continue
             name = s.name or "(unnamed)"
             all_candidates.append({
@@ -1210,6 +1254,7 @@ def setup_session_routes(
                     "status": "ok",
                     "updated": 0,
                     "folders": [],
+                    "projects": [],
                     "deleted_empty": deleted_empty,
                     "deleted_throwaway": deleted_throwaway,
                     "unfiled_remaining": unfiled_total,
@@ -1224,17 +1269,36 @@ def setup_session_routes(
         if not url:
             raise HTTPException(503, "No available model endpoint for auto-sort")
 
-        # Build prompt
+        # Grouping targets the real project registry (MAD-920). Chats can only
+        # be organized into projects that exist; Tidy never invents one.
+        from src import project_registry
+        projects = project_registry.list_projects()
+        if not projects:
+            if deleted_empty or deleted_throwaway:
+                return {
+                    "status": "ok",
+                    "updated": 0,
+                    "folders": [],
+                    "projects": [],
+                    "deleted_empty": deleted_empty,
+                    "deleted_throwaway": deleted_throwaway,
+                    "unfiled_remaining": unfiled_total,
+                }
+            return {"status": "skipped", "reason": "No projects yet — create a project before grouping chats"}
+
+        # Build prompt — the model chooses among existing projects only.
         names_text = "\n".join(f'  "{s["id"][:8]}": "{s["name"]}"' for s in session_list)
+        projects_text = "\n".join(f'  "{p["id"][:8]}": "{p["name"]}"' for p in projects)
         prompt = (
-            "You are a session organizer. Group these chat sessions into folders by topic.\n\n"
+            "You are a chat organizer. Assign these chat sessions to the project each one belongs to.\n\n"
             "Rules:\n"
-            "- Be aggressive about grouping — put EVERY session in a folder\n"
-            "- Use short folder names (2-4 words max)\n"
+            "- Use ONLY the projects listed below; never invent a new project\n"
+            "- Leave a session out of the JSON when none of the projects fit it\n"
             "- Use the 8-char ID prefixes exactly as given\n"
             "- Output ONLY raw JSON, no markdown fences, no explanation\n\n"
             "Required JSON format:\n"
-            '{"folders": {"Folder Name": ["id_prefix1", "id_prefix2"], "Other Folder": ["id_prefix3"]}}\n\n'
+            '{"projects": {"Project Name": ["id_prefix1", "id_prefix2"], "Other Project": ["id_prefix3"]}}\n\n'
+            f"Projects (id_prefix: name):\n{{\n{projects_text}\n}}\n\n"
             f"Sessions (id_prefix: name):\n{{\n{names_text}\n}}"
         )
 
@@ -1285,14 +1349,18 @@ def setup_session_routes(
             logger.error(f"Auto-sort LLM call failed: {e}")
             raise HTTPException(502, f"Auto-sort failed: {str(e)}")
 
-        folders = result.get("folders", {})
-        if not folders:
-            return {"status": "skipped", "reason": "AI found no groupings"}
-
-        # Build id -> folder map
+        groups = result.get("projects", {})
+        if not isinstance(groups, dict):
+            groups = {}
+        # Build id -> project-id map; unknown project names are ignored so the
+        # model can never create a project or bind a chat to a phantom one.
+        by_name = {p["name"].strip().casefold(): p["id"] for p in projects}
         id_prefix_map = {s["id"][:8]: s["id"] for s in session_list}
         assignments = {}
-        for folder_name, ids in folders.items():
+        for project_name, ids in groups.items():
+            target_id = by_name.get(str(project_name or "").strip().casefold())
+            if not target_id or not isinstance(ids, list):
+                continue
             for sid_or_prefix in ids:
                 # Match by full ID or prefix
                 full_id = None
@@ -1310,13 +1378,15 @@ def setup_session_routes(
                                 full_id = fid
                                 break
                 if full_id:
-                    assignments[full_id] = folder_name
+                    assignments[full_id] = target_id
+        if not assignments:
+            return {"status": "skipped", "reason": "AI found no project matches"}
 
-        # Apply folder assignments
+        # Apply project assignments
         updated = 0
         db = SessionLocal()
         try:
-            for sid, folder_name in assignments.items():
+            for sid, target_project_id in assignments.items():
                 db_session_q = db.query(DbSession).filter(DbSession.id == sid)
                 if user:
                     db_session_q = db_session_q.filter(DbSession.owner == user)
@@ -1324,14 +1394,14 @@ def setup_session_routes(
                     db_session_q = db_session_q.filter(DbSession.owner == user)
                 db_session = db_session_q.first()
                 if db_session:
-                    db_session.folder = folder_name
+                    db_session.project_id = target_project_id
                     db_session.updated_at = utcnow_naive()
                     updated += 1
             db.commit()
         except Exception as e:
             db.rollback()
             logger.error(f"Auto-sort DB update failed: {e}")
-            raise HTTPException(500, "Failed to apply folder assignments")
+            raise HTTPException(500, "Failed to apply project assignments")
         finally:
             db.close()
 
@@ -1339,9 +1409,11 @@ def setup_session_routes(
         # frontend uses this to decide whether to show "Tidy more" or
         # "All sorted!" in the toast.
         unfiled_remaining_after = max(0, unfiled_total - updated)
+        touched = sorted({p["name"] for p in projects if p["id"] in set(assignments.values())})
         return {
             "status": "ok",
-            "folders": list(folders.keys()),
+            "folders": touched,
+            "projects": touched,
             "updated": updated,
             "deleted_empty": deleted_empty,
             "deleted_throwaway": deleted_throwaway,

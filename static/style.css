@@ -1872,6 +1872,15 @@ body.bg-pattern-sparkles {
       line-height: 1.2;
       user-select: none;
     }
+    .sidebar-nav-label-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-right: 4px;
+    }
+    .sidebar-nav-label-row > span:first-child { flex: 1; }
+    .sidebar-nav-label-row .list-item-plus-btn { opacity: 0.45; transition: opacity 0.12s ease; }
+    .sidebar-nav-label-row:hover .list-item-plus-btn { opacity: 1; }
     .session-folder { margin: 2px 0; }
     .session-folder-header {
       display: flex; align-items: center; gap: 8px;
@@ -1906,6 +1915,20 @@ body.bg-pattern-sparkles {
     }
     .session-folder-header:hover .folder-delete-btn { opacity: 0.5; }
     .folder-delete-btn:hover { opacity: 1 !important; color: var(--color-error); }
+    /* Hover "+" that starts a session bound to the project (MAD-920). */
+    .project-session-btn {
+      background: none; border: none; color: var(--fg); opacity: 0;
+      cursor: pointer; font-size: 1.1em; padding: 0 2px; line-height: 1;
+      min-height: 0; height: auto;
+      transition: opacity 0.08s, color 0.08s;
+    }
+    .session-folder-header:hover .project-session-btn,
+    .session-folder-header:focus-within .project-session-btn { opacity: 0.65; }
+    .project-session-btn:hover { opacity: 1 !important; color: var(--accent-primary, var(--red)); }
+    .project-session-btn:disabled { display: none; }
+    .project-folder .folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-folder.project-unavailable .folder-name,
+    .project-folder.project-unavailable .folder-icon { opacity: 0.5; }
     .session-folder-content { padding-left: 22px; }
     .session-folder-content .list-item { border-bottom: 0; }
     .session-show-more-btn {
@@ -43479,8 +43502,22 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 @media (max-width: 1249px) { .session-context-panel { box-shadow: 0 10px 48px #0009; width: min(300px, calc(100% - 32px)); } }
 @media (max-width: 768px) { .session-context-toggle { right: 48px; } }
 
-/* Sidebar ordering is available in every agent view, including touch layouts. */
-#session-list .item-drag-handle, #session-list .folder-drag-handle { display: inline-flex !important; flex-shrink: 0; width: 18px; min-height: 24px; align-items: center; justify-content: center; padding: 0; font-size: 13px; letter-spacing: normal; cursor: grab; opacity: .55; }
+/* Sidebar ordering stays available in every agent view, but the move handle
+   stays out of the way until the row is hovered, focused, or rearrange mode is
+   on — the same reveal behavior as the section headers (MAD-908/MAD-920). */
+#session-list .item-drag-handle, #session-list .folder-drag-handle { display: inline-flex; flex-shrink: 0; width: 18px; min-height: 24px; align-items: center; justify-content: center; padding: 0; font-size: 13px; letter-spacing: normal; cursor: grab; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
+#session-list .list-item:hover .item-drag-handle,
+#session-list .list-item:focus-within .item-drag-handle,
+#session-list .session-folder-header:hover .folder-drag-handle,
+#session-list .session-folder-header:focus-within .folder-drag-handle,
+#session-list .list-item.dragging .item-drag-handle,
+#session-list .session-folder.dragging .folder-drag-handle,
+body.rearrange-mode #session-list .item-drag-handle,
+body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-events: auto; }
+/* Touch layouts have no hover: keep the handles available for ordering. */
+@media (hover: none) {
+  #session-list .item-drag-handle, #session-list .folder-drag-handle { opacity: .55; pointer-events: auto; }
+}
 #session-list .folder-icon { display: inline-flex; flex-shrink: 0; }
 #session-list .folder-drag-handle:focus-visible { outline: 2px solid var(--red); border-radius: 4px; }
 
@@ -43572,30 +43609,6 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-}
-
-/* ── Projects (MAD-902) ────────────────────────────────────────────
-   Pandamonium agent-workstation project rows: folder icon + name, and a
-   hover-only + that starts a session bound to that project. */
-.project-item .project-item-icon {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  opacity: 0.65;
-}
-.project-item .project-session-btn {
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.project-item:hover .project-session-btn,
-.project-item:focus-within .project-session-btn {
-  opacity: 0.85;
-}
-.project-item.project-unavailable {
-  opacity: 0.55;
-}
-.project-item.project-unavailable .project-session-btn {
-  pointer-events: none;
 }
 
 /* ── Agent working plan / todos (MAD-917) ─────────────────────────
