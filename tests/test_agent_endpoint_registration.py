@@ -166,6 +166,31 @@ def test_pair_agent_bridge_incompatible_protocol_fails_closed(monkeypatch):
     assert result["reason"] == "bridge_update_required"
 
 
+def test_pair_agent_route_returns_redacted_probe(agent_db, router, monkeypatch):
+    monkeypatch.setattr(model_routes.httpx, "get", _fake_get(_health_payload()))
+    pair = _route(router, "/api/model-endpoints/pair-agent", "POST")
+
+    result = pair(
+        _admin_request(),
+        base_url="http://127.0.0.1:8040",
+        api_key=NODE_TOKEN,
+        bridge_protocol="codex-bridge",
+    )
+    assert result["ok"] is True
+    assert result["protocol"] == "codex-bridge"
+    assert NODE_TOKEN not in json.dumps(result)
+    assert "Bearer" not in json.dumps(result)
+
+
+def test_pair_agent_route_requires_token(agent_db, router):
+    pair = _route(router, "/api/model-endpoints/pair-agent", "POST")
+
+    with pytest.raises(HTTPException) as excinfo:
+        pair(_admin_request(), base_url="http://127.0.0.1:8040", api_key="")
+
+    assert excinfo.value.status_code == 400
+
+
 # ── registration ─────────────────────────────────────────────────────────
 
 
@@ -337,6 +362,16 @@ def test_disabled_agent_endpoint_is_reported_disabled(agent_db, router, monkeypa
     assert rows[0]["is_enabled"] is False
     assert rows[0]["status"] == "disabled"
     assert rows[0]["online"] is False
+
+
+def test_agent_endpoints_are_not_model_transports(agent_db, router, monkeypatch):
+    _insert_agent_row(agent_db)
+    monkeypatch.setattr(model_routes.httpx, "get", _fake_get(_health_payload()))
+    list_models = _route(router, "/api/models", "GET")
+
+    payload = list_models(_admin_request())
+
+    assert payload["items"] == []
 
 
 # ── migration ────────────────────────────────────────────────────────────
