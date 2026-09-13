@@ -1,5 +1,6 @@
 """Project registry tests (MAD-902): real directories, create/import, safety."""
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -64,7 +65,9 @@ def test_import_rejects_missing_and_root_paths(data_dir):
 
 def test_missing_folder_reports_unavailable_without_deleting(data_dir):
     project = project_registry.add_project(name="Ephemeral")
-    Path(project["path"]).rmdir()
+    # The project folder is scaffolded, so remove it recursively to simulate
+    # a folder that disappeared after registration.
+    shutil.rmtree(project["path"])
 
     listed = project_registry.list_projects()
     assert listed[0]["available"] is False
