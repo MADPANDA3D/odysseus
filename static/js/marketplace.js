@@ -346,6 +346,7 @@ function setScanProgress({ state, title, detail, progress = 0, stage = 'fetch' }
 
 function renderScanArtifact(artifact) {
   scanResults.replaceChildren();
+  scanResults.scrollTop = 0;
   scanResults.hidden = false;
 
   const heading = detailSection('Scan result');
@@ -394,11 +395,14 @@ function renderScanArtifact(artifact) {
       ['Default permission', artifact.draft_manifest.permissions?.default || 'read_only'],
     ]);
     const actions = element('div', 'marketplace-action-buttons');
-    const install = element('button', 'marketplace-action-primary', 'Review install');
+    const install = element('button', 'marketplace-action-primary', 'Install plugin…');
     install.type = 'button';
     install.addEventListener('click', () => prepareSourceAction(artifact, draft, actions));
     actions.append(install);
-    draft.append(actions);
+    draft.append(
+      actions,
+      element('p', 'marketplace-action-status', 'Nothing is installed yet — the next step shows the approval preview before anything changes.'),
+    );
   } else {
     draft.append(element('p', '', 'This repository class did not produce a draft manifest; install stays unavailable.'));
   }
@@ -501,14 +505,18 @@ async function prepareSourceAction(artifact, section, actions) {
       scanStatus,
       approvalActions,
     ));
-    const cancel = element('button', '', 'Cancel');
+    const cancel = element('button', '', '← Back to scan');
     cancel.type = 'button';
-    cancel.addEventListener('click', () => { preview.remove(); scanStatus.textContent = 'Install cancelled.'; });
+    cancel.addEventListener('click', () => { preview.remove(); scanStatus.textContent = 'Install cancelled. Back at the scan result.'; });
     approvalActions.append(approve, cancel);
-    preview.append(approvalActions);
+    preview.append(
+      approvalActions,
+      element('p', 'marketplace-action-status', 'Nothing has been installed yet. Approve once to install this exact revision, or go back to the scan result.'),
+    );
     section.append(preview);
-    scanStatus.textContent = 'Review the exact pinned revision before approval.';
-    approve.focus();
+    scanStatus.textContent = 'Review the exact pinned revision, then approve once or go back.';
+    preview.scrollIntoView({ block: 'center' });
+    approve.focus({ preventScroll: true });
   } catch (error) {
     scanStatus.textContent = `Install preview unavailable: ${error?.message || error}`;
     actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
@@ -550,6 +558,7 @@ async function executeAction(plan, plugin, operation, status, actions) {
     if (result.result?.status !== 'succeeded') throw new Error('extension_action_failed');
     window.dispatchEvent(new Event('pandamonium:extensions-changed'));
     await load();
+    status.textContent = `${actionLabel(operation)} completed.`;
     summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
   } catch (error) {
     status.textContent = `${actionLabel(operation)} failed: ${error?.message || error}`;

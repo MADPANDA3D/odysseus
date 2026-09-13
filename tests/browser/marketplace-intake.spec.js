@@ -80,8 +80,10 @@ test('Add from GitHub scans, reviews, and installs through approval', async ({ p
   await expect(page.locator('#marketplace-scan-results')).toContainText('Static scan only');
   await expect(page.locator('#marketplace-scan-results')).toContainText('MIT');
 
-  await page.getByRole('button', { name: 'Review install' }).click();
+  await page.getByRole('button', { name: 'Install plugin…' }).click();
   await expect(page.getByText('Approval required: Install Demo Tools')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve once' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '← Back to scan' })).toBeVisible();
   await page.getByRole('button', { name: 'Approve once' }).click();
   await expect(page.locator('#marketplace-summary')).toContainText('Demo Tools: Install completed.');
 });
