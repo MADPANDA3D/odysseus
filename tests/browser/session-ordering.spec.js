@@ -24,14 +24,14 @@ test('chat dates and latest-message order refresh live without restoring archive
     'Current chat',
     new Date(today.getTime() - 10 * 86400000).toISOString(),
     todayAt(1),
-    { folder: 'Work' },
+    { project_id: 'p-work' },
   );
   const recent = sessionFixture(
     'session-recent',
     'Recent chat',
     todayAt(1),
     todayAt(2),
-    { folder: 'Work' },
+    { project_id: 'p-work' },
   );
   const favoriteYesterday = sessionFixture(
     'session-favorite',
@@ -57,6 +57,11 @@ test('chat dates and latest-message order refresh live without restoring archive
     const url = new URL(route.request().url());
     if (url.pathname === '/api/sessions') {
       return route.fulfill({ json: responseSessions });
+    }
+    if (url.pathname === '/api/projects') {
+      return route.fulfill({ json: { projects: [{
+        id: 'p-work', name: 'Work', path: '/work', resolved_path: '/work', available: true, reason: '',
+      }], root: '/data/projects' } });
     }
     if (url.pathname === '/api/history/session-current') {
       return route.fulfill({

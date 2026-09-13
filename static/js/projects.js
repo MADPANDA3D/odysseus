@@ -1,90 +1,60 @@
 // static/js/projects.js
 //
-// Pandamonium agent workstation projects (MAD-902). Each project is a real
-// directory on the machine Pandamonium runs on: create a new working folder or
-// import an existing one, then start a session bound to it. The project list
-// is server-backed (DATA_DIR/projects.json), so it survives reloads and is
-// shared across browsers for the installation.
+// Pandamonium agent workstation projects (MAD-902, MAD-920). Each project is a
+// real directory on the machine Pandamonium runs on. Creating a project makes
+// the directory and stamps the WhoAmI project-local build into it; importing
+// registers an existing folder. The project list is server-backed
+// (DATA_DIR/projects.json), so it survives reloads and is shared across
+// browsers for the installation.
+//
+// This module owns project data and actions. The Chats sidebar (sessions.js)
+// renders the project folders and their bound chats.
 
 import uiModule from './ui.js';
-import { setWorkspace, pickFolder } from './workspace.js';
+import { pickFolder } from './workspace.js';
 
 const API_BASE = window.location.origin;
 let _projects = [];
-
-const _FOLDER_SVG = '<svg class="workspace-row-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-const _PLUS_SVG = '<svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+let _loadPromise = null;
+let _menu = null;
 
 function _projectPath(project) {
   return project.resolved_path || project.path || '';
 }
 
-function _renderRow(project) {
-  const row = document.createElement('div');
-  row.className = 'list-item project-item';
-  row.dataset.projectId = project.id;
-  row.setAttribute('role', 'button');
-  row.tabIndex = 0;
-  row.title = project.available === false
-    ? `${project.path} — ${project.reason || 'unavailable'}`
-    : project.path;
+export function getProjects() {
+  return _projects;
+}
 
-  const icon = document.createElement('span');
-  icon.className = 'project-item-icon';
-  icon.innerHTML = _FOLDER_SVG;
-  const name = document.createElement('span');
-  name.className = 'grow';
-  name.textContent = project.name;
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'list-item-plus-btn project-session-btn';
-  add.title = `New session in ${project.name}`;
-  add.setAttribute('aria-label', `New session in ${project.name}`);
-  add.innerHTML = _PLUS_SVG;
-  add.addEventListener('click', event => {
-    event.stopPropagation();
-    _startSession(project);
-  });
+export function getProjectById(projectId) {
+  const wanted = projectId ? String(projectId) : '';
+  if (!wanted) return null;
+  return _projects.find(project => String(project.id) === wanted) || null;
+}
 
-  if (project.available === false) {
-    row.classList.add('project-unavailable');
-    row.setAttribute('aria-disabled', 'true');
+function _notifyChanged() {
+  try {
+    window.dispatchEvent(new CustomEvent('odysseus:projects-changed'));
+  } catch (_) {}
+}
+
+export async function refreshProjects() {
+  try {
+    const response = await fetch(`${API_BASE}/api/projects`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`projects_${response.status}`);
+    const data = await response.json();
+    _projects = Array.isArray(data.projects) ? data.projects : [];
+  } catch (_) {
+    _projects = [];
   }
-  row.append(icon, name, add);
-  row.addEventListener('click', () => _selectProject(project));
-  row.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      _selectProject(project);
-    }
-  });
-  return row;
+  _notifyChanged();
+  return _projects;
 }
 
-function _render() {
-  const list = document.getElementById('projects-list');
-  if (!list) return;
-  list.replaceChildren(..._projects.map(_renderRow));
-}
-
-function _guardAvailable(project) {
-  if (project.available !== false) return true;
-  uiModule.showError(`${project.name}: ${project.reason || 'folder is unavailable'}`);
-  return false;
-}
-
-function _selectProject(project) {
-  if (!_guardAvailable(project)) return;
-  setWorkspace(_projectPath(project));
-  uiModule.showToast(`Project: ${project.name}`);
-}
-
-function _startSession(project) {
-  if (!_guardAvailable(project)) return;
-  setWorkspace(_projectPath(project));
-  const newChat = document.getElementById('sidebar-new-chat-btn');
-  if (newChat) newChat.click();
-  uiModule.showToast(`New session in ${project.name}`);
+/** Load projects once (idempotent) — used before the first sidebar render. */
+export function ensureProjectsLoaded() {
+  if (!_loadPromise) _loadPromise = refreshProjects();
+  return _loadPromise;
 }
 
 async function _addProject(payload) {
@@ -96,87 +66,135 @@ async function _addProject(payload) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.detail || 'Could not add the project');
-  _projects = Array.isArray(data.projects) ? data.projects : [];
-  _render();
+  _projects = Array.isArray(data.projects) ? data.projects : _projects;
+  _notifyChanged();
   return data.project || null;
 }
 
-async function _createProject() {
+export async function createProjectInteractive() {
   let name = '';
   try {
-    name = await uiModule.styledPrompt('Create a new project folder for Pandamonium.', {
+    name = await uiModule.styledPrompt('Create a new project folder. Pandamonium stamps the WhoAmI project build into it.', {
       title: 'New project',
       placeholder: 'Project name',
       confirmText: 'Create',
     });
   } catch (_) { name = ''; }
   name = (name || '').trim();
-  if (!name) return;
+  if (!name) return null;
   try {
     const project = await _addProject({ name });
     if (project) uiModule.showToast(`Project created: ${project.name}`);
+    return project;
   } catch (error) {
     uiModule.showError(error.message || 'Could not create the project');
+    return null;
   }
 }
 
-async function _importProject() {
+export async function importProjectInteractive() {
   const path = await pickFolder();
-  if (!path) return;
+  if (!path) return null;
   try {
     const project = await _addProject({ path });
     if (project) uiModule.showToast(`Project added: ${project.name}`);
+    return project;
   } catch (error) {
     uiModule.showError(error.message || 'Could not add the project');
+    return null;
   }
 }
 
-function _bindAddMenu() {
+export async function removeProject(projectId) {
+  const response = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || 'Could not remove the project');
+  _projects = Array.isArray(data.projects) ? data.projects : _projects;
+  _notifyChanged();
+}
+
+function _closeAddMenu() {
+  if (!_menu) return;
+  _menu.classList.remove('show');
   const button = document.getElementById('projects-add-btn');
-  const menu = document.getElementById('projects-add-menu');
-  if (!button || !menu) return;
-  const closeMenu = () => {
-    menu.classList.remove('show');
-    button.setAttribute('aria-expanded', 'false');
-  };
-  button.addEventListener('click', event => {
-    event.stopPropagation();
-    const open = !menu.classList.contains('show');
-    menu.classList.toggle('show', open);
-    button.setAttribute('aria-expanded', String(open));
+  if (button) button.setAttribute('aria-expanded', 'false');
+}
+
+function _ensureAddMenu() {
+  if (_menu) return _menu;
+  _menu = document.createElement('div');
+  _menu.id = 'projects-add-menu';
+  _menu.className = 'dropdown';
+  _menu.setAttribute('role', 'menu');
+  _menu.innerHTML = `
+    <div class="dropdown-item" id="project-create-option" role="menuitem" tabindex="0">
+      <h4>New project</h4>
+      <p>Create a working folder with the WhoAmI build</p>
+    </div>
+    <div class="dropdown-item" id="project-import-option" role="menuitem" tabindex="0">
+      <h4>Add existing folder</h4>
+      <p>Use a folder that already exists</p>
+    </div>`;
+  _menu.querySelector('#project-create-option').addEventListener('click', () => {
+    _closeAddMenu();
+    createProjectInteractive();
   });
-  document.getElementById('project-create-option')?.addEventListener('click', () => {
-    closeMenu();
-    _createProject();
-  });
-  document.getElementById('project-import-option')?.addEventListener('click', () => {
-    closeMenu();
-    _importProject();
+  _menu.querySelector('#project-import-option').addEventListener('click', () => {
+    _closeAddMenu();
+    importProjectInteractive();
   });
   document.addEventListener('click', event => {
-    if (menu.classList.contains('show') && !menu.contains(event.target) && !button.contains(event.target)) {
-      closeMenu();
+    if (_menu.classList.contains('show') && !_menu.contains(event.target)
+      && !(event.target.closest && event.target.closest('#projects-add-btn'))) {
+      _closeAddMenu();
     }
   });
+  document.body.appendChild(_menu);
+  return _menu;
 }
 
-export async function refreshProjects() {
-  try {
-    const response = await fetch(`${API_BASE}/api/projects`, { credentials: 'same-origin' });
-    if (!response.ok) throw new Error(`projects_${response.status}`);
-    const data = await response.json();
-    _projects = Array.isArray(data.projects) ? data.projects : [];
-    _render();
-  } catch (_) {
-    _projects = [];
-    _render();
+/** Open the New/Import menu anchored to the Projects + button. */
+export function openAddMenu(anchor) {
+  const menu = _ensureAddMenu();
+  const button = anchor || document.getElementById('projects-add-btn');
+  if (!button) return;
+  if (menu.classList.contains('show') && button.getAttribute('aria-expanded') === 'true') {
+    _closeAddMenu();
+    return;
   }
+  menu.classList.add('show');
+  menu.style.position = 'fixed';
+  menu.style.right = 'auto';
+  menu.style.visibility = 'hidden';
+  const rect = button.getBoundingClientRect();
+  const menuWidth = menu.offsetWidth || 240;
+  const menuHeight = menu.offsetHeight || 120;
+  let left = rect.right - menuWidth;
+  if (left < 8) left = 8;
+  if (left + menuWidth > window.innerWidth - 8) left = Math.max(8, window.innerWidth - menuWidth - 8);
+  let top = rect.bottom + 4;
+  if (top + menuHeight > window.innerHeight - 8) top = Math.max(8, rect.top - menuHeight - 4);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  menu.style.visibility = '';
+  button.setAttribute('aria-expanded', 'true');
 }
 
 export function initProjects() {
-  if (!document.getElementById('projects-section')) return;
-  _bindAddMenu();
-  refreshProjects();
+  ensureProjectsLoaded();
 }
 
-export default { initProjects, refreshProjects };
+export default {
+  initProjects,
+  refreshProjects,
+  ensureProjectsLoaded,
+  getProjects,
+  getProjectById,
+  createProjectInteractive,
+  importProjectInteractive,
+  removeProject,
+  openAddMenu,
+};
