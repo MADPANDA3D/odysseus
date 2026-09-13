@@ -219,6 +219,44 @@ def test_codex_bridge_binding_is_conversation_scoped_for_registered_agent(agent_
     assert f":{AGENT_WORKER_ID}:conversation" in key
 
 
+def test_registered_agent_is_a_picker_target_with_honest_availability():
+    from src.selector_catalog import build_selector_catalog
+
+    statuses = {
+        AGENT_WORKER_ID: {
+            "id": AGENT_WORKER_ID,
+            "label": "Workstation Node",
+            "configured": True,
+            "enabled": True,
+            "ready": True,
+            "adapter": "codex-bridge",
+            "machine": "Registered node",
+            "capabilities": ["read_only"],
+            "workspaces": ["home-lab"],
+            "installation_capabilities": ["codex"],
+            "connection": {"state": "connected", "protocol_ready": True},
+        }
+    }
+
+    catalog = build_selector_catalog({"items": []}, statuses)
+    target = next(s for s in catalog["selections"] if s["target"] == AGENT_WORKER_ID)
+    assert target["kind"] == "worker"
+    assert target["selectable"] is True
+    assert target["runtime"] == "Codex"
+    assert target["location"] == "Registered node"
+
+    statuses[AGENT_WORKER_ID] = {
+        **statuses[AGENT_WORKER_ID],
+        "enabled": False,
+        "ready": False,
+        "connection": {"state": "unreachable", "reason": "connection_failed"},
+    }
+    catalog = build_selector_catalog({"items": []}, statuses)
+    target = next(s for s in catalog["selections"] if s["target"] == AGENT_WORKER_ID)
+    assert target["selectable"] is False
+    assert target["reason"] == "connection_failed"
+
+
 def test_voice_targets_resolve_registered_agents_from_live_catalog(agent_db):
     _insert_agent_row(agent_db)
     adapters_module.invalidate_agent_adapter_cache()
