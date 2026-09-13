@@ -1,0 +1,23 @@
+[
+  {
+    "extension_id": "oracle",
+    "source_url": "https://github.com/MADPANDA3D/ORACLE.git",
+    "ref": "jos-v0.1.0",
+    "summary": "ORACLE reference extension: geodesic map, scene state, and native action catalog for the JOS workspace.",
+    "categories": ["visualization", "developer-tools"],
+    "license": "MIT",
+    "publisher": {
+      "id": "madpanda3d",
+      "name": "MADPANDA3D",
+      "url": "https://github.com/MADPANDA3D"
+    },
+    "compatibility": {
+      "pandamonium_min": "1.0.10",
+      "pandamonium_max": "1.99.99",
+      "platforms": ["linux", "macos"],
+      "architectures": ["amd64", "arm64"]
+    },
+    "restart_required": "none",
+    "reviewer": "pandamonium-security"
+  }
+]

@@ -39,6 +39,10 @@ persist beyond the request.
    revision. Approve once and the normal authority/execute flow installs the
    extension; the Plugins sidebar refreshes.
 
+Installed-plugin detail (Add Plugins → Installed) shows declared
+`configuration` keys with required/secret flags so the operator knows what a
+plugin needs; secret values are never shown and live in Settings/Connections.
+
 Invalid (non-`https`) URLs fail locally without a request. Closing the modal
 stops polling. If the repository class yields no draft manifest (for example
 an unidentified repository), the install action is not offered.

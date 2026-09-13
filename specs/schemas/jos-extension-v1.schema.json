@@ -90,6 +90,21 @@
         "strategy": {"const": "pinned_revision"},
         "retain_revisions": {"type": "integer", "minimum": 1, "maximum": 10}
       }
+    },
+    "configuration": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "description"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+          "description": {"type": "string", "minLength": 1, "maxLength": 200},
+          "required": {"type": "boolean"},
+          "secret": {"type": "boolean"}
+        }
+      }
     }
   },
   "$defs": {
