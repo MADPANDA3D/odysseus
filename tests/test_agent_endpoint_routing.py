@@ -14,11 +14,12 @@ from tests.helpers.import_state import preserve_import_state
 from tests.helpers.sqlite_db import make_temp_sqlite
 
 with preserve_import_state(
-    "routes.agent_task_routes", "routes.chat_routes", "src.agent_worker_adapters"
+    "routes.agent_task_routes", "routes.chat_routes", "routes.voice_routes", "src.agent_worker_adapters"
 ):
     import core.database as database
     import routes.agent_task_routes as agent_task_routes
     import routes.chat_routes as chat_routes
+    import routes.voice_routes as voice_routes
     import src.agent_worker_adapters as adapters_module
     import src.jarvis_agent as jarvis_agent
 
@@ -216,3 +217,14 @@ def test_codex_bridge_binding_is_conversation_scoped_for_registered_agent(agent_
 
     assert key == other_workspace
     assert f":{AGENT_WORKER_ID}:conversation" in key
+
+
+def test_voice_targets_resolve_registered_agents_from_live_catalog(agent_db):
+    _insert_agent_row(agent_db)
+    adapters_module.invalidate_agent_adapter_cache()
+
+    assert AGENT_WORKER_ID in voice_routes.worker_catalog()
+    assert "home-lab" in voice_routes._current_voice_workspaces()
+    assert voice_routes._voice_worker_label(AGENT_WORKER_ID) == "Workstation Node"
+    assert voice_routes._voice_origin_target({"origin_target": AGENT_WORKER_ID}) == AGENT_WORKER_ID
+    assert voice_routes._voice_origin_target({"origin_target": "jarvis"}) == "jarvis"
