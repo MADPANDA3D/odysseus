@@ -63,6 +63,22 @@ def _catalog_for_worker(worker: str) -> tuple[dict[str, Any], dict[str, dict[str
     return registry, worker_catalog(registry)
 
 
+def _codex_bridge_worker(worker: str) -> bool:
+    """Return true when a worker resolves to a Codex bridge adapter.
+
+    The fixed pc-codex/vps-codex slots are Codex bridges by contract; node-agent
+    endpoints registered as data are recognized by their adapter, so their
+    conversation binding and execution policy stay identical.
+    """
+    if worker in {"pc-codex", "vps-codex"}:
+        return True
+    try:
+        adapter = adapters().get(worker)
+    except Exception:
+        adapter = None
+    return getattr(adapter, "adapter_name", "") == "codex-bridge"
+
+
 def configure(session_manager) -> None:
     global _SESSION_MANAGER
     _SESSION_MANAGER = session_manager
@@ -243,7 +259,7 @@ def task_events(task_id: str, after: int = -1) -> list[dict]:
 def _binding_key(owner: str, session_id: str, worker: str, workspace: str) -> str:
     # A Codex conversation maps to exactly one task/thread across project-browser,
     # text, voice, and reconnect callers. Other worker types retain workspace scope.
-    scope = "conversation" if worker in {"pc-codex", "vps-codex"} else workspace
+    scope = "conversation" if _codex_bridge_worker(worker) else workspace
     return f"v2:{owner}:{session_id}:{worker}:{scope}"
 
 
@@ -812,14 +828,20 @@ async def direct_codex_turn(
     owner: str,
     workspace: str,
     presenter: str,
+    worker: str = "pc-codex",
     codex_thread_id: str | None = None,
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
     explicit_workspace: bool = False,
     images: list[dict] | None = None,
 ) -> tuple[dict, str]:
-    """Start or steer the one Codex task bound to this conversation."""
-    active = find_active_task(session_id, "pc-codex", None, owner)
+    """Start or steer the one Codex task bound to this conversation.
+
+    ``worker`` defaults to the fixed pc-codex slot; registered node-agent
+    endpoints pass their own worker id so the same conversation semantics and
+    authority path apply to data-registered Codex bridges (MAD-934).
+    """
+    active = find_active_task(session_id, worker, None, owner)
     if active:
         _check_active_codex_selection(active, codex_model, codex_reasoning_effort)
         if explicit_workspace and workspace != active.get("workspace"):
@@ -834,11 +856,11 @@ async def direct_codex_turn(
             persist_user_message=False,
             owner=owner,
         ), "steered"
-    binding = get_worker_binding(owner, session_id, "pc-codex", workspace)
+    binding = get_worker_binding(owner, session_id, worker, workspace)
     if not explicit_workspace and not codex_thread_id:
         workspace = str(binding.get("workspace") or workspace)
     task = await start_task(
-        "pc-codex",
+        worker,
         session_id,
         workspace,
         prompt,
@@ -898,7 +920,7 @@ async def start_task(
     if not owner:
         raise PermissionError("owner_required")
     require_session_owner(session_id, owner)
-    if worker in {"pc-codex", "vps-codex"} and not worker_task_execution_enabled():
+    if _codex_bridge_worker(worker) and not worker_task_execution_enabled():
         raise RuntimeError("codex_task_execution_disabled")
     registry, catalog = _catalog_for_worker(worker)
     if worker not in catalog:
@@ -947,7 +969,7 @@ async def start_task(
         binding = get_worker_binding(owner, session_id, worker, workspace)
         bound_workspace = str(binding.get("workspace") or "")
         if (
-            worker in {"pc-codex", "vps-codex"}
+            _codex_bridge_worker(worker)
             and binding.get("codex_thread_id")
             and bound_workspace
             and bound_workspace != workspace

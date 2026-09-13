@@ -82,6 +82,29 @@ def _selected_agent_context(label: str) -> str:
     )
 
 
+def _worker_adapter_details(worker: str) -> dict:
+    """Resolve a worker's catalog details (adapter, label, workspaces)."""
+    from src.agent_worker_adapters import configured_worker
+
+    return configured_worker(worker)
+
+
+def _direct_worker_route(worker: str) -> str:
+    """Classify a selected conversation worker for the direct (non-Jarvis) path.
+
+    "codex" covers the fixed pc-codex slot and Codex bridges registered as
+    node-agent endpoints; the Jarvis dispatcher is only bypassed for a worker
+    whose adapter is actually configured, so an unknown target never silently
+    reroutes.
+    """
+    if worker == "hermes":
+        return "hermes"
+    details = _worker_adapter_details(worker)
+    if details and details.get("adapter") == "codex-bridge":
+        return "codex"
+    return ""
+
+
 async def _direct_selected_identity_turn(
     worker: str,
     *,
@@ -107,13 +130,16 @@ async def _direct_selected_identity_turn(
             session_id, message, owner=owner, workspace=workspace,
             **({"images": turn_context["images"]} if turn_context and turn_context.get("images") else {}),
         ), "completed"
-    if worker == "pc-codex":
+    if _direct_worker_route(worker) == "codex":
         task, action = await direct_codex_turn(
             session_id,
             message,
             owner=owner,
             workspace=workspace,
             presenter=presenter,
+            # Omit the default so the fixed pc-codex call signature is
+            # unchanged; registered node agents pass their own worker id.
+            **({"worker": worker} if worker != "pc-codex" else {}),
             codex_thread_id=codex_thread_id,
             codex_model=codex_model,
             codex_reasoning_effort=codex_reasoning_effort,
@@ -933,7 +959,7 @@ def setup_chat_routes(
                     selected_agent_label = str(details.get("label") or agent_target)[:80]
                     selected_agent_worker = agent_target
                     selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
-                    if agent_target == "pc-codex" and worker_workspace:
+                    if worker_workspace and details.get("adapter") == "codex-bridge":
                         if worker_workspace not in set(details.get("workspaces") or []):
                             raise HTTPException(400, "Selected project is not allowlisted")
                         selected_agent_workspace = worker_workspace
@@ -1047,7 +1073,10 @@ def setup_chat_routes(
             agent_mode=(chat_mode == "agent" and not hermes_agent_api),
             allow_tool_preprocessing=allow_tool_preprocessing,
             persist_user=not _authority_control,
-            native_agent_images=selected_agent_worker in {"pc-codex", "hermes"},
+            native_agent_images=(
+                selected_agent_worker == "hermes"
+                or _direct_worker_route(selected_agent_worker) == "codex"
+            ),
         )
         active_character_name = selected_agent_label or ctx.preset.character_name
 
@@ -1399,7 +1428,7 @@ def setup_chat_routes(
                 _active_streams.pop(session, None)
                 return
 
-            if selected_agent_worker in {"hermes", "pc-codex"}:
+            if selected_agent_worker and _direct_worker_route(selected_agent_worker):
                 route_started = time.monotonic()
                 route_model = selected_agent_label or selected_agent_worker
                 metrics = {

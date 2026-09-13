@@ -127,15 +127,18 @@ def setup_agent_task_routes(session_manager):
         if worker not in WORKER_IDS:
             registry = adapters(include_external=True)
             adapter = registry.get(worker)
-            if not adapter or getattr(adapter, "adapter_name", "") != "external-agent-sidecar":
+            if adapter is None:
                 raise ValueError("unknown_worker")
-            sidecar_action = "start" if action in {"create", "resume"} else action
-            adapter.validate_action_arguments(sidecar_action, exact_action_arguments)
-            external_policy = await adapter.action_policy(
-                sidecar_action,
-                owner=owner,
-                workspace=workspace,
-            )
+            if getattr(adapter, "adapter_name", "") == "external-agent-sidecar":
+                sidecar_action = "start" if action in {"create", "resume"} else action
+                adapter.validate_action_arguments(sidecar_action, exact_action_arguments)
+                external_policy = await adapter.action_policy(
+                    sidecar_action,
+                    owner=owner,
+                    workspace=workspace,
+                )
+            # Registered node agents fall through to the same authority path
+            # as the fixed workers: no external sidecar policy is involved.
         call = normalize_action_call(
             request_id=request_id,
             call_id=str(uuid.uuid4()),
@@ -288,7 +291,7 @@ def setup_agent_task_routes(session_manager):
             statuses = await worker_statuses(owner=owner, include_external=True)
             return {
                 worker: status for worker, status in statuses.items()
-                if worker not in WORKER_IDS
+                if worker not in WORKER_IDS and status.get("adapter") != "codex-bridge"
             }
         except ExternalAgentBridgeError as exc:
             raise HTTPException(503, exc.code)
