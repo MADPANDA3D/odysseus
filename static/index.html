@@ -2729,6 +2729,29 @@
             </div>
           </div>
 
+          <!-- ── Tailnet card ───────────────────────────────────────── -->
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6.5 6.5 10 10"/><path d="M17.5 6.5 14 10"/><path d="M6.5 17.5 10 14"/><path d="M17.5 17.5 14 14"/></svg>Add Tailscale Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Node URL)</span>
+              <span style="flex:1"></span>
+              <button class="admin-btn-sm" id="adm-epTailnetScanBtn" title="List online tailnet peers and probe the ones you select" aria-controls="adm-epTailnetResults" style="font-size:11px;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Scan Tailnet
+              </button>
+            </h2>
+            <div class="admin-toggle-sub" style="margin:0 0 10px 2px;">Find model servers on your own tailnet nodes. Scan lists online peers; select up to 5 to probe, or paste a tailnet URL directly.</div>
+            <div class="adm-add-section">
+              <div class="admin-model-form">
+                <div class="admin-model-form-row">
+                  <input id="adm-epTailnetUrl" type="text" placeholder="Tailnet URL, e.g. http://100.x.y.z:8000/v1" style="flex:1;min-width:0;">
+                  <button class="admin-btn-add" id="adm-epTailnetAddBtn" style="min-width:55px;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add
+                  </button>
+                </div>
+                <div id="adm-epTailnetMsg" class="adm-ep-inline-msg"></div>
+                <div id="adm-epTailnetResults" aria-live="polite" aria-label="Tailnet discovery results"></div>
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <!-- ═══ ADDED MODELS TAB ═══ -->
@@ -2755,6 +2778,12 @@
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>API
               </div>
               <div id="adm-epList-api"><div class="admin-empty">No API endpoints yet.</div></div>
+            </div>
+            <div class="adm-ep-section" style="margin-top:18px;">
+              <div class="adm-ep-section-head" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;opacity:0.7;margin-bottom:6px;display:inline-flex;align-items:center;gap:5px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6.5 6.5 10 10"/><path d="M17.5 6.5 14 10"/><path d="M6.5 17.5 10 14"/><path d="M17.5 17.5 14 14"/></svg>Tailnet
+              </div>
+              <div id="adm-epList-tailnet"><div class="admin-empty">No tailnet endpoints yet.</div></div>
             </div>
           </div>
         </div>
