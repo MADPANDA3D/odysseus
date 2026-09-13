@@ -97,3 +97,22 @@ test('non-admin gets a status-only setup view with no dead-end actions', async (
   await expect(modal.locator('.setup-lane-action')).toHaveCount(0);
   await expect(modal).not.toContainText('Updates');
 });
+
+
+test('an unreadable setup status does not auto-open the wizard', async ({ page }) => {
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/auth/status') {
+      return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    }
+    if (path === '/api/setup/status') return route.fulfill({ json: {} });
+    if (path === '/api/models' || path === '/api/model-endpoints' || path === '/api/sessions') {
+      return route.fulfill({ json: [] });
+    }
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+
+  await expect(page.locator('#user-bar-guide')).toBeVisible();
+  await expect(page.locator('#guide-modal')).toHaveClass(/hidden/);
+});

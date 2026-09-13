@@ -45,6 +45,16 @@ function _dismissForever() {
   Storage.set(DISMISS_KEY, '1');
 }
 
+function _isStatusPayload(payload) {
+  return Boolean(
+    payload
+    && typeof payload === 'object'
+    && typeof payload.is_admin === 'boolean'
+    && payload.identity && typeof payload.identity === 'object'
+    && payload.model && typeof payload.model === 'object'
+  );
+}
+
 async function fetchStatus(force = false) {
   if (!force && _status && Date.now() - _statusFetchedAt < STATUS_TTL_MS) {
     return _status;
@@ -52,7 +62,8 @@ async function fetchStatus(force = false) {
   try {
     const res = await fetch(`${API_BASE}/api/setup/status`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('status unavailable');
-    _status = await res.json();
+    const payload = await res.json();
+    _status = _isStatusPayload(payload) ? payload : { unavailable: true };
   } catch (_) {
     if (!_status) _status = { unavailable: true };
   }
