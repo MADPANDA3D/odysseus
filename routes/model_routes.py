@@ -2520,6 +2520,25 @@ def setup_model_routes(model_discovery):
             "category": _classify_endpoint(base_url, requested_kind),
         }
 
+    @router.post("/model-endpoints/pair-agent")
+    def pair_agent_endpoint(
+        request: Request,
+        base_url: str = Form(...),
+        api_key: str = Form(""),
+        bridge_protocol: str = Form("codex-bridge"),
+    ):
+        """Test one node-bridge pairing live; never persists, never echoes the token."""
+        require_admin(request)
+        base = _normalize_base(base_url)
+        if not base:
+            raise HTTPException(400, "Node bridge address is required.")
+        token = str(api_key or "").strip()
+        if not token:
+            raise HTTPException(400, "Pairing code required. Paste the one-time code shown by the node bridge.")
+        from src.endpoint_resolver import resolve_url
+        base = resolve_url(base)
+        return _probe_agent_bridge(base, token, protocol=bridge_protocol)
+
     @router.get("/model-endpoints/{ep_id}/probe")
     def probe_endpoint_models(ep_id: str, request: Request):
         """Re-probe all models on an endpoint. Updates hidden_models and streams SSE results."""
