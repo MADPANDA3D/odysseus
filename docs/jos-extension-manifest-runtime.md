@@ -47,3 +47,25 @@ and nothing was deployed.
 Verification: 9 focused contract/registry tests and the complete repository
 suite of 4,983 passed with 4 intentional skips and 0 failures. Python
 compilation, JSON parsing, and `git diff --check` also pass.
+
+## Configuration declarations (MAD-939)
+
+Manifests may include an optional top-level `configuration` array declaring the
+keys a plugin needs at runtime:
+
+```json
+"configuration": [
+  {"key": "ORACLE_API_TOKEN", "description": "Owner-supplied token", "required": true, "secret": true}
+]
+```
+
+Rules: at most 32 entries; `key` is an upper-snake identifier
+(`^[A-Z][A-Z0-9_]{0,63}$`) and unique; `description` is required and bounded to
+200 characters; `required`/`secret` are booleans and default to `false`.
+Unknown fields fail closed. Declarations are metadata only: values never live
+in manifests, the registry, or operator payloads — they stay in
+Settings/Connections. Manifests without the field remain valid and normalize
+without it, so existing installed records and signed catalogs are unchanged.
+The installed-plugin detail projection exposes the declarations (key,
+description, flags) with no values.
+

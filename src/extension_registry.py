@@ -25,6 +25,7 @@ EXTENSION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 SKILL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,59}$")
 TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
 REVISION_PATTERN = re.compile(r"^(?:self|[0-9a-f]{40}|[0-9a-f]{64})$")
+CONFIGURATION_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 IMMUTABLE_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 PERMISSION_MODES = frozenset(
     {"read_only", "bounded_write", "external_side_effect", "destructive", "controlled_administrative"}
@@ -35,9 +36,9 @@ SKILL_BUNDLE_FORMATS = frozenset({"agent_skill", "codex_plugin"})
 _TOP_LEVEL_FIELDS = frozenset({
     "protocol_version", "extension_id", "name", "version", "source", "runtime",
     "capabilities", "permissions", "health", "lifecycle", "data_boundaries",
-    "removal", "rollback",
+    "removal", "rollback", "configuration",
 })
-_REQUIRED_FIELDS = _TOP_LEVEL_FIELDS
+_REQUIRED_FIELDS = _TOP_LEVEL_FIELDS - {"configuration"}
 
 
 class ExtensionContractError(ValueError):
@@ -222,6 +223,39 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
     ):
         raise ExtensionContractError("extension_permission_capability_unknown")
 
+    configuration_raw = value.get("configuration", [])
+    if not isinstance(configuration_raw, list) or len(configuration_raw) > 32:
+        raise ExtensionContractError("extension_configuration_invalid")
+    configuration: list[dict[str, Any]] = []
+    seen_configuration_keys: set[str] = set()
+    for raw_item in configuration_raw:
+        item = _object(raw_item, "extension_configuration_invalid")
+        _strict_fields(
+            item,
+            {"key", "description", "required", "secret"},
+            "extension_configuration_unknown_field",
+        )
+        if {"key", "description"} - set(item):
+            raise ExtensionContractError("extension_configuration_invalid")
+        config_key = _bounded_text(item.get("key"), "extension_configuration_key_invalid", maximum=64)
+        if not CONFIGURATION_KEY_PATTERN.fullmatch(config_key) or config_key in seen_configuration_keys:
+            raise ExtensionContractError("extension_configuration_key_invalid")
+        seen_configuration_keys.add(config_key)
+        required = item.get("required", False)
+        secret = item.get("secret", False)
+        if not isinstance(required, bool) or not isinstance(secret, bool):
+            raise ExtensionContractError("extension_configuration_flag_invalid")
+        configuration.append({
+            "key": config_key,
+            "description": _bounded_text(
+                item.get("description"),
+                "extension_configuration_description_invalid",
+                maximum=200,
+            ),
+            "required": required,
+            "secret": secret,
+        })
+
     health = _object(value.get("health"), "extension_health_invalid")
     health_type = str(health.get("type") or "")
     if health_type == "catalog":
@@ -287,6 +321,10 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
         "removal": removal,
         "rollback": {"strategy": "pinned_revision", "retain_revisions": retain},
     })
+    if configuration:
+        normalized["configuration"] = configuration
+    else:
+        normalized.pop("configuration", None)
     return normalized
 
 

@@ -149,7 +149,16 @@ def _registry_detail(extension_id: str, record: Mapping[str, Any]) -> dict[str, 
             "network": [_text(item, 300) for item in (boundaries.get("network") or [])][:64],
         },
         "capabilities": capabilities,
-        "configuration": [],
+        "configuration": [
+            {
+                "key": _text(item.get("key"), 64),
+                "description": _text(item.get("description"), 200),
+                "required": bool(item.get("required")),
+                "secret": bool(item.get("secret")),
+            }
+            for item in (manifest.get("configuration") or [])[:32]
+            if isinstance(item, Mapping)
+        ],
         "notes": notes,
     }
 

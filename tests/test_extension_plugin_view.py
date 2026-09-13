@@ -30,6 +30,14 @@ def _tool(name: str) -> dict:
 def _registry_with_oracle(tmp_path: Path) -> ExtensionRegistry:
     registry = ExtensionRegistry(tmp_path / "extensions.json")
     oracle = _manifest("oracle")
+    oracle["configuration"] = [
+        {
+            "key": "ORACLE_API_TOKEN",
+            "description": "Owner-supplied token",
+            "required": True,
+            "secret": True,
+        }
+    ]
     revision = oracle["source"]["revision"]
     registry.register(
         oracle,
@@ -85,7 +93,14 @@ def test_registry_detail_exposes_capabilities_with_descriptions_and_no_secrets(t
     ]
     assert detail["permissions"]["default"] == "bounded_write"
     assert detail["permissions"]["capabilities"] == {"inspect_globe": "read_only"}
-    assert detail["configuration"] == []
+    assert detail["configuration"] == [
+        {
+            "key": "ORACLE_API_TOKEN",
+            "description": "Owner-supplied token",
+            "required": True,
+            "secret": True,
+        }
+    ]
     assert detail["notes"] == [
         "Browser-surface extension: its tools become available when the surface is engaged."
     ]
