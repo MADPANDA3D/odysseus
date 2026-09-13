@@ -40,7 +40,7 @@ createServer(async (request, response) => {
     let body = await readFile(asset);
     const cookies = request.headers.cookie?.split(';').map(value => value.trim()) || [];
     if (pathname === '/static/sw.js' && cookies.includes(FUTURE_WORKER_COOKIE)) {
-      body = Buffer.from(body.toString('utf8').replace('pandamonium-v412', 'pandamonium-v413'));
+      body = Buffer.from(body.toString('utf8').replace('pandamonium-v413', 'pandamonium-v414'));
     }
     response.writeHead(200, {
       'Content-Type': CONTENT_TYPES[extname(asset)] || 'application/octet-stream',
