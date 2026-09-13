@@ -132,6 +132,14 @@ test('unfiled chats reveal five at a time above Projects without a nested scroll
   ));
   expect(topLevelOrder.slice(0, 2)).toEqual(['recent', 'label:Projects']);
 
+  // Flush left: no reserved drag-handle gutter. The project folder icon lines
+  // up with the Projects label, and a nested chat keeps only the folder indent.
+  const labelBox = await page.locator('#session-list .sidebar-nav-label-row > span').first().boundingBox();
+  const folderBox = await page.locator('.session-folder[data-project-id="project-alpha"] .folder-icon').boundingBox();
+  const chatBox = await page.locator('.session-folder[data-project-id="project-alpha"] .session-star').first().boundingBox();
+  expect(Math.abs(folderBox.x - labelBox.x)).toBeLessThanOrEqual(2);
+  expect(Math.round(chatBox.x - folderBox.x)).toBe(22);
+
   for (const count of [10, 15, 18]) {
     await unfiled.getByRole('button', { name: 'Show more' }).click();
     await expect(unfiled.locator('.session-item')).toHaveCount(count);

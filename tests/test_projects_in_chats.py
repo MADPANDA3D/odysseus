@@ -369,11 +369,14 @@ def test_chats_render_real_projects_and_bind_sessions():
 
 def test_session_move_handles_are_hidden_at_rest():
     css = (ROOT / "static/style.css").read_text(encoding="utf-8")
-    marker = "#session-list .item-drag-handle, #session-list .folder-drag-handle { display: inline-flex"
+    marker = "#session-list .item-drag-handle, #session-list .folder-drag-handle { position: absolute"
     assert marker in css
     rule = css[css.index(marker):]
     rule = rule[: rule.index("}")]
     assert "opacity: 0;" in rule
     assert "pointer-events: none;" in rule
+    # No reserved gutter: the hidden handle must not take layout space.
+    assert "flex-shrink: 0;" not in rule
     assert "#session-list .list-item:hover .item-drag-handle" in css
     assert "body.rearrange-mode #session-list .folder-drag-handle" in css
+    assert "transform: translateX(16px)" in css
