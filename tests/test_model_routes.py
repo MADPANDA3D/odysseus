@@ -44,6 +44,7 @@ with preserve_import_state("core.database", "src.database", "core.session_manage
         _is_chat_model,
         _classify_endpoint,
         _effective_endpoint_kind,
+        _normalize_endpoint_kind,
         _probe_endpoint,
         _ping_endpoint,
         _parse_model_list,
@@ -1035,6 +1036,8 @@ def _create_form_kwargs(**overrides):
     """
     kwargs = dict(
         name="",
+        tailnet_peer_id="",
+        tailnet_port="",
         api_key="",
         skip_probe="true",  # avoid any network probe in unit tests
         require_models="false",
@@ -1657,6 +1660,8 @@ def test_explicit_proxy_add_fetches_and_caches_models_with_long_timeout(monkeypa
         _route_request(),
         name="Bifrost",
         base_url="http://100.117.136.97:34521/v1",
+        tailnet_peer_id="",
+        tailnet_port="",
         api_key="fake-key",
         skip_probe="true",
         require_models="false",
@@ -1872,3 +1877,81 @@ def test_speech_endpoints_are_not_chat_default_candidates(monkeypatch):
 
     assert settings["default_endpoint_id"] == "exists"
     assert "default_model" not in settings
+
+
+# ── MAD-933 tailnet endpoints ──
+
+def test_classify_endpoint_keeps_explicit_tailnet_kind():
+    assert _normalize_endpoint_kind("tailnet") == "tailnet"
+    assert _classify_endpoint("http://100.64.1.7:8000/v1", "tailnet") == "tailnet"
+    assert _classify_endpoint("http://100.64.1.7:8000/v1", "local") == "local"
+
+
+def test_post_tailnet_candidate_resolves_address_server_side(monkeypatch):
+    class Discovery:
+        def resolve_tailnet_candidate(self, peer_id, port):
+            assert peer_id == "a" * 32
+            assert str(port) == "8000"
+            return "http://100.64.1.7:8000/v1"
+
+    db = _PinnedFakeDb([])
+    router = model_routes.setup_model_routes(model_discovery=Discovery())
+    _patch_create_deps(monkeypatch, db)
+    create = _route_endpoint(router, "/api/model-endpoints", "POST")
+
+    result = create(
+        _PinnedFakeRequest(),
+        base_url="",
+        **_create_form_kwargs(
+            endpoint_kind="tailnet",
+            tailnet_peer_id="a" * 32,
+            tailnet_port="8000",
+        ),
+    )
+
+    assert len(db.added) == 1
+    assert db.added[0].base_url == "http://100.64.1.7:8000/v1"
+    assert db.added[0].endpoint_kind == "tailnet"
+    assert result["endpoint_kind"] == "tailnet"
+    assert result["category"] == "tailnet"
+
+
+def test_post_tailnet_candidate_requires_peer_and_port(monkeypatch):
+    db = _PinnedFakeDb([])
+    router = model_routes.setup_model_routes(model_discovery=None)
+    _patch_create_deps(monkeypatch, db)
+    create = _route_endpoint(router, "/api/model-endpoints", "POST")
+
+    with pytest.raises(HTTPException) as exc:
+        create(
+            _PinnedFakeRequest(),
+            base_url="",
+            **_create_form_kwargs(tailnet_peer_id="a" * 32),
+        )
+    assert exc.value.status_code == 400
+    assert db.added == []
+
+
+def test_post_tailnet_candidate_rejects_unissued_selection(monkeypatch):
+    class Discovery:
+        def resolve_tailnet_candidate(self, peer_id, port):
+            raise ValueError("peer selection was not issued or has expired")
+
+    db = _PinnedFakeDb([])
+    router = model_routes.setup_model_routes(model_discovery=Discovery())
+    _patch_create_deps(monkeypatch, db)
+    create = _route_endpoint(router, "/api/model-endpoints", "POST")
+
+    with pytest.raises(HTTPException) as exc:
+        create(
+            _PinnedFakeRequest(),
+            base_url="",
+            **_create_form_kwargs(
+                endpoint_kind="tailnet",
+                tailnet_peer_id="b" * 32,
+                tailnet_port="8000",
+            ),
+        )
+    assert exc.value.status_code == 400
+    assert "expired" in str(exc.value.detail)
+    assert db.added == []
