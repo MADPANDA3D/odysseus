@@ -64,6 +64,10 @@ To keep concurrent agents conflict-free:
   a consolidated train does not collapse multiple issues into one item.
 - CT103 is updated once per train, only through operator action (the signed
   updater) or an explicit manual request.
+- Tag the release-PR merge commit on `main`. Tagging a release-branch prep
+  commit instead leaves that release's merge commit inside the next train's
+  commit range, which forces the previous release's issues into the next
+  train's notes for provenance.
 
 ## Train checklist
 
