@@ -4105,7 +4105,12 @@ function startPandamoniumApp() {
 
   // Auto-focus input on load
   if (messageInput) {
-    setTimeout(() => messageInput.focus(), 100);
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (!active || active === document.body || active === document.documentElement) {
+        messageInput.focus();
+      }
+    }, 100);
   }
 
   // Add drag and drop handlers for the chat container

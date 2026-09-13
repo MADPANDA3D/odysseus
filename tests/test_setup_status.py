@@ -154,3 +154,14 @@ def test_visible_model_ids_drops_hidden_models():
 def test_visible_model_ids_tolerates_invalid_json():
     assert setup_routes._visible_model_ids("not-json", None) == set()
     assert setup_routes._visible_model_ids(None, "not-json") == set()
+
+
+def test_is_chat_capable_accepts_llm_and_legacy_rows():
+    assert setup_routes._is_chat_capable(SimpleNamespace(model_type="llm"))
+    assert setup_routes._is_chat_capable(SimpleNamespace(model_type=None))
+    assert setup_routes._is_chat_capable(SimpleNamespace(model_type=""))
+
+
+def test_is_chat_capable_rejects_non_chat_endpoints():
+    for model_type in ("image", "stt", "tts"):
+        assert not setup_routes._is_chat_capable(SimpleNamespace(model_type=model_type))

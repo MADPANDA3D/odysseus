@@ -67,6 +67,12 @@ def _visible_model_ids(cached_models: Any, hidden_models: Any) -> set[str]:
     return {str(item) for item in _load(cached_models) if str(item) not in hidden}
 
 
+def _is_chat_capable(endpoint: Any) -> bool:
+    """True for chat/LLM endpoints; legacy rows have no model_type."""
+    model_type = getattr(endpoint, "model_type", None)
+    return model_type in (None, "", "llm")
+
+
 def _project_model(user: str, is_admin: bool) -> Dict[str, Any]:
     from core.database import ModelEndpoint, SessionLocal
 
@@ -77,7 +83,7 @@ def _project_model(user: str, is_admin: bool) -> Dict[str, Any]:
             query = query.filter(
                 (ModelEndpoint.owner == user) | (ModelEndpoint.owner.is_(None))
             )
-        endpoints = query.all()
+        endpoints = [endpoint for endpoint in query.all() if _is_chat_capable(endpoint)]
         models: set[str] = set()
         for endpoint in endpoints:
             models.update(

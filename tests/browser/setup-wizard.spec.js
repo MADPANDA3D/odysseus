@@ -61,6 +61,7 @@ test('first-run admin is guided to name the assistant without opening settings',
   const modal = page.locator('#guide-modal');
   await expect(modal).not.toHaveClass(/hidden/);
   await expect(modal).toContainText('Set up Pandamonium');
+  await expect(modal.getByRole('button', { name: 'Name it' })).toBeFocused();
   await expect(modal.locator('.setup-lane').filter({ hasText: 'Assistant name' }))
     .toContainText('Required');
 

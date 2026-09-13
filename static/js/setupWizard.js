@@ -70,14 +70,32 @@ async function _fetchGallery() {
   return _gallery;
 }
 
-export function open(options = {}) {
+function _focusPrimary(modal) {
+  return modal.querySelector(
+    '.setup-lane-action.is-primary, .setup-wizard-primary, .setup-lane-action, .setup-wizard-field input'
+  );
+}
+
+function _ensureFocusTrap(modal) {
+  if (modal._setupFocusTrap) return;
+  modal._setupFocusTrap = (event) => {
+    if (!_isOpen()) return;
+    const node = event.target;
+    if (node && modal.contains(node)) return;
+    _focusPrimary(modal)?.focus({ preventScroll: true });
+  };
+  document.addEventListener('focusin', modal._setupFocusTrap);
+}
+
+export async function open(options = {}) {
   const modal = _modal();
   if (!modal) return;
   modal.classList.remove('hidden');
   _view = options.step ? { name: 'step', step: options.step } : { name: 'home', step: null };
   if (options.notice) _notice = options.notice;
-  render();
-  modal.querySelector('.setup-wizard-primary, .setup-lane-action, .setup-wizard-field input')?.focus();
+  _ensureFocusTrap(modal);
+  await render();
+  _focusPrimary(modal)?.focus();
 }
 
 export function close() {
@@ -88,7 +106,11 @@ export function close() {
 
 export async function refreshStatus() {
   _statusFetchedAt = 0;
-  if (_isOpen()) render();
+  if (!_isOpen()) return;
+  const previous = _status;
+  const next = await fetchStatus(true);
+  if (previous && JSON.stringify(next) === JSON.stringify(previous)) return;
+  render();
 }
 
 export async function maybeAutoOpen(authStatus) {
