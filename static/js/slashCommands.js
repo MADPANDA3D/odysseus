@@ -23,6 +23,7 @@ import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
 import { getBrandName } from './brand.js';
+import { detectProvider, connectDetectedEndpoint, chatUrlForEndpoint } from './modelConnect.js';
 
 // ── Module state ──────────────────────────────────────────────────────
 
@@ -37,16 +38,6 @@ let _addMessage = chatRenderer.addMessage;
 let _hideWelcomeScreen = chatRenderer.hideWelcomeScreen;
 let _isStreamingFn = () => false;  // callback to check streaming state
 
-// API key patterns for provider auto-detection
-const PROVIDER_PATTERNS = [
-  { re: /^sk-ant-/,          name: 'Anthropic',  url: 'https://api.anthropic.com/v1' },
-  { re: /^sk-or-/,           name: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
-  { re: /^sk-proj-/,         name: 'OpenAI',     url: 'https://api.openai.com/v1' },
-  { re: /^gsk_/,             name: 'Groq',       url: 'https://api.groq.com/openai/v1' },
-  { re: /^AIza/,             name: 'Gemini',     url: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-  { re: /^xai-/,             name: 'xAI',        url: 'https://api.x.ai/v1' },
-  { re: /^nvapi-/,           name: 'NVIDIA',     url: 'https://integrate.api.nvidia.com/v1' },
-];
 const SETUP_PROVIDER_URLS = {
   deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com/v1' },
   openai: { name: 'OpenAI', url: 'https://api.openai.com/v1' },
@@ -631,51 +622,9 @@ function maskKey(key) {
 }
 
 /**
- * Detect provider from a pasted API key or URL.
- * Returns { base_url, api_key, name } or null if unrecognised.
+ * Connect a detected endpoint from the /setup chat flow. The transport lives
+ * in modelConnect.js so the first-run wizard can reuse it.
  */
-function detectProvider(input) {
-  const trimmed = input.trim();
-  // URL or bare IP/hostname — self-hosted endpoint
-  // Matches: http://..., https://..., llm-host:8080, localhost:8000, myserver:8080/v1
-  if (/^https?:\/\//i.test(trimmed) || /^(\d{1,3}\.){1,3}\d{1,3}(:\d+)?/i.test(trimmed) || /^(localhost|[\w.-]+:\d{2,5})/i.test(trimmed)) {
-    let url = trimmed.replace(/\/+$/, '');
-    if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
-    // Strip trailing path segments to get a clean base
-    for (const suffix of ['/models', '/chat/completions', '/completions', '/v1/messages']) {
-      if (url.endsWith(suffix)) url = url.slice(0, -suffix.length).replace(/\/+$/, '');
-    }
-    url = url.replace(/\/api\/(chat|tags|generate)\/?$/i, '/api');
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname.endsWith('ollama.com')) url = 'https://ollama.com/api';
-    } catch(e) {}
-    // Add /v1 if bare host:port
-    if (/^https?:\/\/[^/]+$/.test(url) && !url.includes('api.') && !url.includes('ollama.com')) url += '/v1';
-    return { base_url: url, api_key: '', name: '' };
-  }
-  // Known key patterns
-  for (const p of PROVIDER_PATTERNS) {
-    if (p.re.test(input)) {
-      return { base_url: p.url, api_key: input, name: p.name };
-    }
-  }
-  // Generic sk- keys are ambiguous (OpenAI legacy, DeepSeek, and others).
-  // Never guess a provider for a secret: asking avoids sending the key to
-  // OpenRouter/OpenAI/etc. by mistake during setup probing.
-  if (/^sk-[a-zA-Z0-9_\-]{20,}$/.test(input)) {
-    return { ambiguous: true, api_key: input };
-  }
-  return null;
-}
-
-function setupChatUrlForEndpoint(detected) {
-  const base = (detected.base_url || '').replace(/\/+$/, '');
-  if (detected.name === 'Anthropic') return base.replace(/\/v1$/, '') + '/v1/messages';
-  if (base.includes('ollama.com')) return 'https://ollama.com/api/chat';
-  return base + '/chat/completions';
-}
-
 async function connectDetectedSetupEndpoint(detected) {
   const providerLabel = detected.name || 'custom endpoint';
   const chatBox = document.getElementById('chat-history');
@@ -694,39 +643,28 @@ async function connectDetectedSetupEndpoint(detected) {
   setupSpinner.start(150);
   uiModule.scrollHistory();
 
-  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/i.test(detected.base_url);
-
   try {
-    const fd = new FormData();
-    fd.append('base_url', detected.base_url);
-    if (detected.api_key) fd.append('api_key', detected.api_key);
-    if (detected.name) fd.append('name', detected.name);
-    fd.append('require_models', 'true');
-    if (!isLocal) fd.append('skip_probe', 'true');
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
-    const res = await fetch(`${API_BASE}/api/model-endpoints`, { method: 'POST', body: fd, credentials: 'same-origin', signal: controller.signal });
-    clearTimeout(timer);
-    const data = await res.json();
+    const result = await connectDetectedEndpoint(detected, { apiBase: API_BASE });
 
-    if (!res.ok) {
+    if (!result.ok && result.failure === 'http_error') {
       setupSpinner.destroy();
       spinnerDiv.remove();
       setupMode = 'endpoint-provider-first';
-      await typewriterReply(`Endpoint was not saved: ${data.detail || 'connection failed'}`);
+      await typewriterReply(`Endpoint was not saved: ${result.data.detail || 'connection failed'}`);
       return;
     }
+    if (!result.ok) throw new Error('connection failed');
 
-    const count = (data.models || []).length;
+    const count = result.models.length;
     if (count > 0) {
       setupSpinner.destroy();
       spinnerDiv.remove();
       await typewriterReply(`Found ${count} model${count > 1 ? 's' : ''} on ${providerLabel}. Starting a chat...`);
       if (modelsModule) await modelsModule.refreshModels(true);
-      const firstModel = data.models[0];
-      const chatUrl = setupChatUrlForEndpoint(detected);
+      const firstModel = result.models[0];
+      const chatUrl = chatUrlForEndpoint(detected);
       if (sessionModule) {
-        await sessionModule.createDirectChat(chatUrl, firstModel, data.id);
+        await sessionModule.createDirectChat(chatUrl, firstModel, result.data.id);
       }
       await typewriterReply("You're all set. Type /tour for a walkthrough, or /setup endpoint to add another endpoint or key.");
       _clearSetupGuideMessages();
