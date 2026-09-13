@@ -62,6 +62,7 @@ def test_public_ui_reuses_authenticated_identity_settings_and_guides_setup():
     settings_js = (REPO_ROOT / "static" / "js" / "settings.js").read_text(encoding="utf-8")
     app_js = (REPO_ROOT / "static" / "app.js").read_text(encoding="utf-8")
     setup_js = (REPO_ROOT / "static" / "js" / "slashCommands.js").read_text(encoding="utf-8")
+    wizard_js = (REPO_ROOT / "static" / "js" / "setupWizard.js").read_text(encoding="utf-8")
 
     for element_id in (
         "set-agentIdentityCard",
@@ -81,12 +82,25 @@ def test_public_ui_reuses_authenticated_identity_settings_and_guides_setup():
     ):
         assert setting_key in settings_js
 
-    assert "Make Pandamonium yours" in app_js
-    assert "Name the persistent agent" in app_js
-    assert "Model engine" in app_js
-    assert "Integrations" in app_js
-    assert "pandamonium-first-run-dismissed" in app_js
-    assert "settingsModule.open(definition.tab)" in app_js
+    assert "guide-modal" in html
+    assert "guide-panel" in html
+    assert "welcome-setup" not in html
+
+    assert "import setupWizardModule from './js/setupWizard.js'" in app_js
+    assert "setupWizardModule.init(API_BASE" in app_js
+    assert "setupWizardModule.maybeAutoOpen(d)" in app_js
+    assert "pandamonium-setup-wizard-closed" in app_js
+    assert "setupWizardModule.refreshStatus()" in app_js
+    assert "_renderFirstRunGuide" not in app_js
+    assert "pandamonium-first-run-dismissed" not in app_js
+
+    assert "pandamonium-setup-wizard-dismissed" in wizard_js
+    assert "/api/setup/status" in wizard_js
+    assert "What should we call your assistant?" in wizard_js
+    assert "Give it a brain" in wizard_js
+    assert "Managed by your administrator" in wizard_js
+    assert "agent_display_name" in wizard_js
+
     assert "Set up Pandamonium" in setup_js
     assert "Pandamonium is the harness" in setup_js
     assert "setup-guide-action" in setup_js
