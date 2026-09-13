@@ -68,4 +68,3 @@ Settings/Connections. Manifests without the field remain valid and normalize
 without it, so existing installed records and signed catalogs are unchanged.
 The installed-plugin detail projection exposes the declarations (key,
 description, flags) with no values.
-
