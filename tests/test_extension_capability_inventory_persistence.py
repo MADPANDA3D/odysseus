@@ -131,6 +131,38 @@ def test_tampered_or_stale_inventory_fails_closed_without_touching_authority(tmp
     assert "inspect_globe" in stale_registry.effective_capabilities()
 
 
+def test_legacy_enabled_record_backfills_inventory_without_adapters(tmp_path):
+    path = tmp_path / "extensions.json"
+    registry = ExtensionRegistry(path)
+    _register_oracle(registry)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    del state["extensions"]["oracle"]["capability_inventory"]
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+    reopened = ExtensionRegistry(path)
+
+    inventory = reopened.capability_inventory("oracle")
+    assert inventory is not None
+    assert validate_capability_inventory(inventory) == inventory
+    assert [item["name"] for item in inventory["capabilities"]] == ["inspect_globe"]
+    assert "inspect_globe" in reopened.effective_capabilities()
+
+
+def test_legacy_disabled_record_cannot_backfill_without_metadata(tmp_path):
+    path = tmp_path / "extensions.json"
+    registry = ExtensionRegistry(path)
+    _register_oracle(registry)
+    registry.disable("oracle")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    del state["extensions"]["oracle"]["capability_inventory"]
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+    reopened = ExtensionRegistry(path)
+
+    assert reopened.capability_inventory("oracle") is None
+    assert reopened.effective_capabilities() == {}
+
+
 def test_skill_bundle_inventory_survives_disable(tmp_path):
     manifest = _manifest("atlas")
     manifest["runtime"] = {"type": "skills", "entrypoint": "skills"}

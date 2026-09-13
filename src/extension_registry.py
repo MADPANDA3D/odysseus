@@ -521,6 +521,25 @@ class ExtensionRegistry:
                             capability_inventory = None
                     except ExtensionContractError:
                         capability_inventory = None
+                elif capabilities or admitted_skills:
+                    # MAD-916 backfill: records installed before the inventory
+                    # existed rebuild it from the already-validated effective
+                    # metadata, without re-running any adapter.
+                    try:
+                        from src.extension_capability_inventory import (
+                            build_capability_inventory,
+                        )
+
+                        capability_inventory = build_capability_inventory(
+                            {
+                                "manifest": manifest,
+                                "capabilities": capabilities,
+                                "admitted_skills": admitted_skills,
+                            },
+                            source_revision=manifest["source"]["revision"],
+                        )
+                    except ExtensionContractError:
+                        capability_inventory = None
                 extensions[extension_id] = {
                     "enabled": record["enabled"],
                     "manifest": manifest,
