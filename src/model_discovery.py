@@ -325,9 +325,39 @@ class ModelDiscovery:
         return {
             "peer_id": peer_id,
             "provider": provider,
+            "port": port,
             "models": models,
             "capabilities": ["model-list"],
         }
+
+    def resolve_tailnet_candidate(self, peer_id: str, port: Any) -> str:
+        """Resolve one selected, issued peer + probed port into a base URL.
+
+        Only the server-side registration path calls this; discovery responses
+        keep the peer address private (see ``list_tailnet_peers``). Raises
+        ``ValueError`` for anything the operator did not explicitly select.
+        """
+        peer = str(peer_id or "")
+        try:
+            resolved_port = int(str(port or "").strip())
+        except (TypeError, ValueError):
+            raise ValueError("invalid tailnet target")
+        if resolved_port not in {target[0] for target in _TAILNET_TARGETS}:
+            raise ValueError("invalid tailnet target")
+        now = time.monotonic()
+        if not _OPAQUE_PEER_ID.fullmatch(peer) or self._tailnet_issued.get(peer, 0) <= now:
+            raise ValueError("peer selection was not issued or has expired")
+        current = {
+            self._tailnet_peer_id(record): record
+            for record in _tailnet_records(_tailscale_status())
+        }
+        record = current.get(peer)
+        if record is None:
+            raise ValueError("peer selection is no longer available")
+        # Ollama serves its native API at the root; every other probed target
+        # is OpenAI-compatible under /v1.
+        suffix = "" if resolved_port == 11434 else "/v1"
+        return f"http://{record['address']}:{resolved_port}{suffix}"
 
     def discover_tailnet_models(self, peer_ids: List[str]) -> Dict[str, Any]:
         """Probe only a bounded set of opaque IDs issued by ``list_tailnet_peers``."""

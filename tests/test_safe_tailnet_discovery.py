@@ -224,3 +224,75 @@ def test_discover_route_modes_and_rejects_unknown_mode(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         endpoint(object(), mode="agent_scan", peer_ids=None)
     assert exc.value.status_code == 400
+
+
+def test_probe_candidate_reports_port_without_network_identity(monkeypatch):
+    raw = _status((_TAILNET_A, "secret-host", "linux"))
+    monkeypatch.setattr(
+        model_discovery.subprocess, "run", lambda *args, **kwargs: _run_result(raw)
+    )
+    discovery = ModelDiscovery("localhost")
+    peer_id = discovery.list_tailnet_peers()["peers"][0]["id"]
+
+    class Response:
+        is_success = True
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        @staticmethod
+        def iter_bytes():
+            yield json.dumps({"data": [{"id": "qwen-safe"}]}).encode()
+
+    monkeypatch.setattr(
+        model_discovery.httpx, "stream", lambda *args, **kwargs: Response()
+    )
+
+    result = discovery.discover_tailnet_models([peer_id])
+    ports = {candidate["port"] for candidate in result["candidates"]}
+    assert ports
+    assert all(isinstance(port, int) for port in ports)
+    rendered = json.dumps(result)
+    assert _TAILNET_A not in rendered
+    assert "secret-host" not in rendered
+    assert "http://" not in rendered
+
+
+def test_resolve_tailnet_candidate_builds_base_urls(monkeypatch):
+    raw = _status((_TAILNET_A, "private-node", "linux"))
+    monkeypatch.setattr(
+        model_discovery.subprocess, "run", lambda *args, **kwargs: _run_result(raw)
+    )
+    discovery = ModelDiscovery("localhost")
+    peer_id = discovery.list_tailnet_peers()["peers"][0]["id"]
+
+    assert (
+        discovery.resolve_tailnet_candidate(peer_id, 8000)
+        == f"http://{_TAILNET_A}:8000/v1"
+    )
+    assert (
+        discovery.resolve_tailnet_candidate(peer_id, "11434")
+        == f"http://{_TAILNET_A}:11434"
+    )
+
+    with pytest.raises(ValueError, match="invalid tailnet target"):
+        discovery.resolve_tailnet_candidate(peer_id, 9999)
+    with pytest.raises(ValueError, match="not issued"):
+        discovery.resolve_tailnet_candidate("b" * 32, 8000)
+
+
+def test_resolve_tailnet_candidate_expires_with_ttl(monkeypatch):
+    raw = _status((_TAILNET_A, "private-node", "linux"))
+    monkeypatch.setattr(
+        model_discovery.subprocess, "run", lambda *args, **kwargs: _run_result(raw)
+    )
+    discovery = ModelDiscovery("localhost")
+    peer_id = discovery.list_tailnet_peers()["peers"][0]["id"]
+    discovery._tailnet_issued[peer_id] = 0.0
+
+    with pytest.raises(ValueError, match="not issued or has expired"):
+        discovery.resolve_tailnet_candidate(peer_id, 8000)
