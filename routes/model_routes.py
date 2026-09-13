@@ -63,10 +63,10 @@ _ENDPOINT_FALLBACK_FIELDS = {
 # Model types an endpoint may be configured as. Chat model selection only
 # consumes "llm" (static/js/models.js), "image" powers Gallery, and "stt"/"tts"
 # configure local speech servers (selected via the endpoint:<id> voice
-# providers). "agent" marks a registered node-agent endpoint (MAD-934): it is
-# not a chat model transport, so the model picker lists its worker identity
-# instead. Unknown values are rejected instead of being stored.
-MODEL_ENDPOINT_TYPES = ("llm", "image", "stt", "tts", "agent")
+# providers). Unknown values are rejected instead of being stored. Node-agent
+# endpoints (MAD-934) set model_type="agent" directly and never pass through
+# this model-transport validation.
+MODEL_ENDPOINT_TYPES = ("llm", "image", "stt", "tts")
 
 
 def normalize_model_endpoint_type(value) -> str:
