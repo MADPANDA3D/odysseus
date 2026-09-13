@@ -62,10 +62,12 @@ def temp_db(tmp_path, monkeypatch):
 
 def _add_session(factory, **fields):
     sid = str(uuid.uuid4())
+    fields.setdefault("name", "chat")
+    fields.setdefault("endpoint_url", "http://localhost")
+    fields.setdefault("model", "test-model")
     db = factory()
     try:
-        db.add(DbSession(id=sid, name="chat", endpoint_url="http://localhost",
-                         model="test-model", **fields))
+        db.add(DbSession(id=sid, **fields))
         db.commit()
     finally:
         db.close()
@@ -257,6 +259,93 @@ def test_list_sessions_returns_project_binding(data_dir, temp_db, monkeypatch):
     result = endpoint(request=MagicMock())
     row = next(item for item in result if item["id"] == sid)
     assert row["project_id"] == project["id"]
+
+
+def test_auto_sort_assigns_chats_to_existing_projects(data_dir, temp_db, monkeypatch):
+    from routes import session_routes as sr
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(sr, "SessionLocal", temp_db)
+    monkeypatch.setattr(sr, "effective_user", lambda request: "alice")
+    monkeypatch.setattr(sr, "_pick_endpoint_for_sort", lambda owner=None: ("http://utility", "utility-model", {}))
+    monkeypatch.setattr("src.task_endpoint.resolve_task_endpoint", lambda owner=None: (None, None, None))
+
+    listed = project_registry.add_project(name="Listed")
+    project_registry.add_project(name="Other")
+
+    first = _add_session(temp_db, owner="alice", name="Alpha planning",
+                         last_message_at=cdb.utcnow_naive(), last_accessed=cdb.utcnow_naive())
+    second = _add_session(temp_db, owner="alice", name="Beta notes",
+                          last_message_at=cdb.utcnow_naive(), last_accessed=cdb.utcnow_naive())
+
+    prefix = first[:8]
+    monkeypatch.setattr(
+        "src.llm_core.llm_call",
+        lambda *args, **kwargs: '{"projects": {"Listed": ["%s"]}}' % prefix,
+    )
+
+    def _session(sid, name):
+        return types.SimpleNamespace(id=sid, name=name, archived=False,
+                                     updated_at=cdb.utcnow_naive(), created_at=cdb.utcnow_naive())
+
+    sm = MagicMock()
+    sm.get_sessions_for_user.return_value = {first: _session(first, "Alpha planning"),
+                                             second: _session(second, "Beta notes")}
+    sr.setup_session_routes(sm, {})
+    endpoint = next(
+        r.endpoint for r in reversed(sr.router.routes)
+        if getattr(r, "path", "") == "/api/sessions/auto-sort"
+        and "POST" in getattr(r, "methods", set())
+    )
+
+    result = endpoint(request=MagicMock(), skip_llm=False)
+
+    assert result["status"] == "ok"
+    assert result["updated"] == 1
+    assert result["projects"] == ["Listed"]
+    db = temp_db()
+    try:
+        rows = {row.id: row.project_id for row in db.query(DbSession).all()}
+    finally:
+        db.close()
+    assert rows[first] == listed["id"]
+    assert rows[second] is None
+
+
+def test_auto_sort_skips_llm_when_no_projects_exist(data_dir, temp_db, monkeypatch):
+    from routes import session_routes as sr
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(sr, "SessionLocal", temp_db)
+    monkeypatch.setattr(sr, "effective_user", lambda request: "alice")
+    monkeypatch.setattr(sr, "_pick_endpoint_for_sort", lambda owner=None: ("http://utility", "utility-model", {}))
+    monkeypatch.setattr("src.task_endpoint.resolve_task_endpoint", lambda owner=None: (None, None, None))
+    called = []
+    monkeypatch.setattr("src.llm_core.llm_call", lambda *args, **kwargs: called.append(1) or "{}")
+
+    first = _add_session(temp_db, owner="alice", name="Alpha planning",
+                         last_message_at=cdb.utcnow_naive(), last_accessed=cdb.utcnow_naive())
+    second = _add_session(temp_db, owner="alice", name="Beta notes",
+                          last_message_at=cdb.utcnow_naive(), last_accessed=cdb.utcnow_naive())
+    sm = MagicMock()
+    sm.get_sessions_for_user.return_value = {
+        first: types.SimpleNamespace(id=first, name="Alpha planning", archived=False,
+                                     updated_at=cdb.utcnow_naive(), created_at=cdb.utcnow_naive()),
+        second: types.SimpleNamespace(id=second, name="Beta notes", archived=False,
+                                      updated_at=cdb.utcnow_naive(), created_at=cdb.utcnow_naive()),
+    }
+    sr.setup_session_routes(sm, {})
+    endpoint = next(
+        r.endpoint for r in reversed(sr.router.routes)
+        if getattr(r, "path", "") == "/api/sessions/auto-sort"
+        and "POST" in getattr(r, "methods", set())
+    )
+
+    result = endpoint(request=MagicMock(), skip_llm=False)
+
+    assert result["status"] == "skipped"
+    assert "No projects yet" in result["reason"]
+    assert called == []
 
 
 # ── Frontend wiring guards ───────────────────────────────────────────────
