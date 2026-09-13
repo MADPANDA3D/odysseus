@@ -414,7 +414,7 @@ def test_books_ui_and_responsive_root_rules_are_present():
     assert "data.queued_count" in library_js
     assert 'role="tab"' in library_js
     assert "ArrowRight" in library_js and "ArrowLeft" in library_js
-    assert ".first-run-step-state" in style and "white-space:normal" in style
+    assert ".setup-lane-state" in style and "overflow-wrap:anywhere" in style
     assert "#doclib-modal .doclib-modal-content" in style
     assert "min(1120px, calc(100vw - 32px))" in style
     assert 'thinking-toggle live-think-toggle expanded' not in chat_js

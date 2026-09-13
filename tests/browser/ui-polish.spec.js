@@ -20,6 +20,19 @@ async function mockApp(page, { mailboxes = null } = {}) {
       });
     }
     if (url.pathname === '/api/default-chat') return route.fulfill({ json: model });
+    if (url.pathname === '/api/setup/status') {
+      return route.fulfill({
+        json: {
+          is_admin: true,
+          identity: { configured: true, display_name: 'Jarvis', status: 'healthy' },
+          model: { usable: true, endpoints: 1, models: 1 },
+          voice: { ready: false, enabled: true, provider: 'disabled' },
+          integrations: { configured: 0, portal_connected: false },
+          extensions: { installed: 0, enabled: 0 },
+          update: { version: '1.0.55', state: 'idle', target_version: null, rollback_available: false },
+        },
+      });
+    }
     if (url.pathname === '/api/models') {
       return route.fulfill({
         json: {
@@ -114,7 +127,7 @@ test('mailbox account cards keep readable two-column, zoom, and mobile layouts',
   expect(mobile.every(card => card.right <= mobileGrid.right + 0.5 && card.left >= mobileGrid.left - 0.5)).toBe(true);
 });
 
-test('setup guide can be skipped, closed, reopened, continued, and restarted without changing settings', async ({ page }) => {
+test('setup wizard opens from the guide button, names the assistant, and keeps settings intact', async ({ page }) => {
   const savedToggles = JSON.stringify({ web: true, web_chat: true, web_agent: true, mcp: true });
   await page.addInitScript(value => localStorage.setItem('odysseus-toggles', value), savedToggles);
   await mockApp(page);
@@ -124,76 +137,38 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
   const guideButton = page.locator('#user-bar-guide');
   const modal = page.locator('#guide-modal');
   await expect(guideButton).toBeVisible();
+  await expect(modal).toHaveClass(/hidden/);
   const initializedToggles = await page.evaluate(() => localStorage.getItem('odysseus-toggles'));
+
   await guideButton.click();
   await expect(modal).toBeVisible();
-  await expect(modal.getByRole('button', { name: 'Continue setup' })).toBeVisible();
-  await expect(modal.getByRole('button', { name: 'Restart product tour' })).toBeVisible();
-  await expect(modal.getByRole('button', { name: 'Skip for now' })).toBeVisible();
-  const stepCards = modal.locator('.first-run-step');
-  await expect(stepCards).toHaveCount(4);
-  await expect(stepCards.nth(2)).toContainText('Connect your gallery');
-  await expect(stepCards.nth(2)).toContainText('Found: Immich on photo-server');
-  await modal.locator('.guide-modal-content').evaluate(async node => {
-    await Promise.all(node.getAnimations().map(animation => animation.finished));
-  });
-  const guideWidth = await modal.locator('.guide-modal-content').evaluate(node => node.getBoundingClientRect().width);
-  const stepLayout = await stepCards.evaluateAll(nodes => nodes.map(node => {
-    const rect = node.getBoundingClientRect();
-    const index = node.querySelector('.first-run-step-index').getBoundingClientRect();
-    const label = node.querySelector('.first-run-step-label').getBoundingClientRect();
-    const state = node.querySelector('.first-run-step-state').getBoundingClientRect();
-    return {
-      top: rect.top,
-      bottom: rect.bottom,
-      width: rect.width,
-      height: rect.height,
-      indexTop: index.top,
-      indexBottom: index.bottom,
-      labelBottom: label.bottom,
-      stateTop: state.top,
-      stateBottom: state.bottom,
-    };
-  }));
-  expect(guideWidth).toBeGreaterThanOrEqual(500);
-  expect(guideWidth).toBeLessThanOrEqual(530);
-  expect(stepLayout[1].top).toBeGreaterThanOrEqual(stepLayout[0].bottom + 7);
-  expect(stepLayout[2].top).toBeGreaterThanOrEqual(stepLayout[1].bottom + 7);
-  expect(stepLayout[3].top).toBeGreaterThanOrEqual(stepLayout[2].bottom + 7);
-  expect(Math.max(...stepLayout.map(card => card.width)) - Math.min(...stepLayout.map(card => card.width))).toBeLessThan(2);
-  expect(stepLayout.every(card => card.height >= 52)).toBe(true);
-  expect(stepLayout.every(card => card.indexTop > card.top && card.indexBottom < card.bottom)).toBe(true);
-  expect(stepLayout.every(card => card.labelBottom <= card.stateTop + 1)).toBe(true);
-  expect(stepLayout.every(card => card.stateBottom <= card.bottom - 8)).toBe(true);
+  await expect(modal).toContainText('Set up Pandamonium');
+  const lanes = modal.locator('.setup-lane');
+  await expect(lanes).toHaveCount(7);
+  await expect(lanes.filter({ hasText: 'Assistant name' })).toContainText('Ready — Jarvis');
+  await expect(lanes.filter({ hasText: 'Model engine' })).toContainText('Ready');
+  await expect(lanes.filter({ hasText: 'Updates' })).toContainText('Version 1.0.55');
+  await expect(modal.locator('.setup-lane-action')).toHaveCount(6);
+  expect(await page.evaluate(() => localStorage.getItem('odysseus-toggles'))).toBe(initializedToggles);
 
-  await stepCards.nth(2).click();
-  await expect(modal).toBeHidden();
-  await expect(page.locator('#gallery-modal')).toBeVisible();
-  await expect(page.locator('#gallery-settings-container')).toBeVisible();
-  await expect(page.locator('#gallery-source-card h2')).toHaveText('Gallery sources');
-  await page.locator('#gallery-close').click();
-  await expect(page.locator('#gallery-modal')).toHaveCount(0);
-  await guideButton.click();
+  await modal.getByRole('button', { name: 'Name it' }).click();
+  await expect(modal).toContainText('What should we call your assistant?');
+  const input = modal.locator('.setup-wizard-field input');
+  await expect(input).toHaveValue('Jarvis');
+  await input.fill('Atlas');
+  await modal.getByRole('button', { name: 'Save name' }).click();
+  await expect(modal.locator('.setup-wizard-notice')).toContainText('Saved — your assistant is now called Atlas.');
+  await expect(modal.locator('.setup-lane').filter({ hasText: 'Assistant name' })).toContainText('Ready');
 
-  await modal.getByRole('button', { name: 'Skip for now' }).click();
-  await expect(modal).toBeHidden();
-  await guideButton.click();
-  await modal.getByRole('button', { name: 'Close setup guide' }).click();
+  await modal.getByRole('button', { name: 'Done' }).click();
   await expect(modal).toBeHidden();
   await expect(guideButton).toBeFocused();
 
   await guideButton.click();
-  await modal.getByRole('button', { name: 'Continue setup' }).click();
-  await expect(page.locator('#chat-history')).toContainText('Set up Pandamonium');
+  await expect(modal.getByRole('button', { name: "Don't show this at startup" })).toBeVisible();
+  await modal.getByRole('button', { name: 'Close setup guide' }).click();
+  await expect(modal).toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem('odysseus-toggles'))).toBe(initializedToggles);
-
-  await guideButton.click();
-  await modal.getByRole('button', { name: 'Restart product tour' }).click();
-  await expect(page.locator('body')).toHaveClass(/tour-active/, { timeout: 8_000 });
-  await expect(page.locator('#tour-tooltip')).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('odysseus-toggles'))).toBe(initializedToggles);
-  await page.locator('#tour-tooltip .tour-btn-skip').click();
-  await expect(page.locator('body')).not.toHaveClass(/tour-active/);
 });
 
 test('ASK_USER keeps long choices readable and supports keyboard selection, Send, and close', async ({ page }) => {
