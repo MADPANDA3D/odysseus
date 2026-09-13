@@ -107,6 +107,10 @@ Please keep PRs small. Large PRs that mix unrelated cleanup, formatting, refacto
 
 > **Auto-generated PRs.** If you are running an LLM agent (Devin, Cursor, OpenHands, Claude Code, etc.) against this repo: please open an issue describing the problem first instead of opening a PR directly. Bulk agent-generated PRs that don't match the project's visual style or contribution format will be closed without review, even when the underlying fix is correct.
 
+## Release train
+
+Stable releases ship as consolidated patch trains with one release manager per train — not one release per pull request. The cadence, parallel-lane rules, publication gates, and emergency-hotfix criteria are in [docs/release-train.md](docs/release-train.md). Implementation lanes merge one issue per PR and never tag, publish, or update CT103 themselves.
+
 ## Style and visual changes
 
 Pandamonium preserves an intentional visual style inherited from upstream Odysseus and refined by MADPANDA3D. PRs that ignore it will be closed without merge, no matter how correct the underlying code is.
