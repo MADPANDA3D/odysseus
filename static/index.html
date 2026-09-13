@@ -2711,6 +2711,37 @@
             </div>
           </div>
 
+          <!-- ── Agent node card ─────────────────────────────────────── -->
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>Add Agent Node <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Codex bridge)</span>
+              <span style="flex:1"></span>
+              <button class="admin-btn-sm" id="adm-agentTestBtn" style="font-size:11px;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Test
+              </button>
+            </h2>
+            <div class="admin-toggle-sub" style="margin:0 0 10px 2px;">Pair a workstation bridge as a conversation agent. On the node, start the bridge, copy its one-time pairing code, and paste it here.</div>
+            <div class="adm-add-section">
+              <div class="admin-model-form">
+                <div class="admin-model-form-row">
+                  <input id="adm-agentUrl" type="text" placeholder="Node bridge URL, e.g. http://192.168.1.20:8040" style="flex:1;min-width:0;">
+                </div>
+                <div class="admin-model-form-row">
+                  <input id="adm-agentToken" type="password" placeholder="One-time pairing code from the node" autocomplete="off" style="flex:1">
+                </div>
+                <div class="admin-model-form-row">
+                  <input id="adm-agentName" type="text" placeholder="Label shown in the picker (optional)" style="flex:1;min-width:0;">
+                </div>
+                <div class="admin-model-form-row">
+                  <input id="adm-agentWorkspaces" type="text" placeholder="Allowed workspaces, comma-separated (optional)" style="flex:1;min-width:0;">
+                  <button class="admin-btn-add" id="adm-agentAddBtn" style="min-width:55px;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Pair
+                  </button>
+                </div>
+                <div id="adm-agentMsg" class="adm-ep-inline-msg"></div>
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <!-- ═══ ADDED MODELS TAB ═══ -->
@@ -2726,7 +2757,13 @@
               </button>
             </h2>
             <div class="admin-toggle-sub" style="margin-bottom:12px">Endpoints you've connected. Probe re-tests them all; Clear offline removes the dead ones.</div>
-            <div class="adm-ep-section">
+            <div class="adm-ep-section" style="margin-bottom:18px;">
+              <div class="adm-ep-section-head" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;opacity:0.7;margin-bottom:6px;display:inline-flex;align-items:center;gap:5px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>Agents
+              </div>
+              <div id="adm-epList-agent"><div class="admin-empty">No agent nodes yet.</div></div>
+            </div>
+            <div class="adm-ep-section" style="margin-top:18px;">
               <div class="adm-ep-section-head" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;opacity:0.7;margin-bottom:6px;display:inline-flex;align-items:center;gap:5px;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Local
               </div>

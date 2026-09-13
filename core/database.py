@@ -517,6 +517,11 @@ class ModelEndpoint(TimestampMixin, Base):
     # Optional OAuth/session-backed credential row. Used by subscription-backed
     # providers that need refresh tokens instead of a static API key.
     provider_auth_id = Column(String, nullable=True, index=True)
+    # JSON metadata for first-class node-agent endpoints (endpoint_kind="agent"):
+    # bridge protocol, node workspaces, and other node-owned fields. Model
+    # endpoints leave this NULL. Kept as JSON so a new node-agent field does not
+    # need another schema migration; the pairing token itself stays in api_key.
+    agent_meta = Column(Text, nullable=True)
 
 
 class ProviderAuthSession(TimestampMixin, Base):
@@ -1047,6 +1052,30 @@ def _migrate_add_provider_auth_id_column():
             logging.getLogger(__name__).info("Migrated: added 'provider_auth_id' column + index to model_endpoints")
     except Exception as e:
         logging.getLogger(__name__).warning(f"model_endpoints.provider_auth_id migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_add_agent_meta_column():
+    """Add agent_meta column to model_endpoints if it doesn't exist."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(model_endpoints)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "agent_meta" not in columns:
+            conn.execute("ALTER TABLE model_endpoints ADD COLUMN agent_meta TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'agent_meta' column to model_endpoints")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"model_endpoints.agent_meta migration failed: {e}")
     finally:
         try:
             conn.close()
@@ -2065,6 +2094,7 @@ def init_db():
     _migrate_add_model_endpoint_refresh_columns()
     _migrate_add_model_endpoint_owner_column()
     _migrate_add_provider_auth_id_column()
+    _migrate_add_agent_meta_column()
     _migrate_add_supports_tools_column()
     _migrate_add_task_run_model_column()
     _migrate_add_owner_column()

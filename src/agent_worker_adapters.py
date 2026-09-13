@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,6 +19,9 @@ MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
 WORKER_IDS = ("pc-codex", "hermes", "vps-codex")
 _WORKSPACE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 CODEX_BRIDGE_PROTOCOL = "pandamonium.codex-bridge.v2"
+AGENT_ENDPOINT_KIND = "agent"
+LEGACY_CODEX_ENDPOINT_ID = "pc-codex"
+AGENT_BRIDGE_PROTOCOLS = ("codex-bridge",)
 
 
 class WorkerUnavailable(RuntimeError):
@@ -63,6 +67,51 @@ def configured_worker_workspaces() -> dict[str, list[str]]:
             raise RuntimeError("invalid_worker_workspace_configuration")
         configured[worker] = list(dict.fromkeys(values))
     return configured
+
+
+def agent_meta(row: Any) -> dict[str, Any]:
+    """Return the parsed agent metadata blob for a node endpoint row."""
+    value = getattr(row, "agent_meta", None)
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(str(value or ""))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def agent_endpoint_workspaces(row: Any) -> list[str]:
+    """Return the allowlisted workspaces a registered node endpoint exposes."""
+    values = agent_meta(row).get("workspaces")
+    if not isinstance(values, list):
+        return []
+    workspaces: list[str] = []
+    for value in values[:32]:
+        text = str(value or "").strip()
+        if _WORKSPACE_NAME.fullmatch(text) and text not in workspaces:
+            workspaces.append(text)
+    return workspaces
+
+
+def agent_endpoint_protocol(row: Any) -> str:
+    """Return the bridge protocol a registered node endpoint was paired with."""
+    protocol = " ".join(str(agent_meta(row).get("protocol") or "").split())[:40]
+    return protocol if protocol in AGENT_BRIDGE_PROTOCOLS else AGENT_BRIDGE_PROTOCOLS[0]
+
+
+def agent_worker_id(endpoint_id: str) -> str:
+    """Map a node endpoint row id to its stable worker id.
+
+    The migrated legacy Codex binding keeps the historical ``pc-codex`` worker
+    id so existing voice/chat bindings keep resolving; every other registered
+    node gets an ``agent-`` prefixed id that cannot collide with fixed workers.
+    """
+    value = str(endpoint_id or "").strip()
+    if value == LEGACY_CODEX_ENDPOINT_ID:
+        return LEGACY_CODEX_ENDPOINT_ID
+    safe = re.sub(r"[^a-z0-9_-]+", "-", value.lower()).strip("-")[:57]
+    return f"agent-{safe or 'node'}"
 
 
 def _token(path: Path) -> str:
@@ -185,12 +234,13 @@ class CodexBridgeAdapter:
         self,
         worker: str,
         url: str,
-        token_file: Path,
+        token_file: Path | None,
         *,
         enabled: bool,
         machine: str,
         label: str | None = None,
         workspaces: list[str] | None = None,
+        token: str | None = None,
     ):
         self.worker = worker
         self.url = url.rstrip("/")
@@ -199,9 +249,17 @@ class CodexBridgeAdapter:
         self.machine = machine
         self.label = label or ("PC Codex" if worker == "pc-codex" else "VPS Codex")
         self.configured_workspaces = list(workspaces or [])
+        # Registered node endpoints carry their pairing token in the row; the
+        # fixed env-configured workers keep reading it from disk.
+        self.token_value = str(token or "")
+
+    def _token(self) -> str:
+        if self.token_value:
+            return self.token_value
+        return _token(self.token_file) if self.token_file else ""
 
     def _headers(self) -> dict[str, str]:
-        token = _token(self.token_file)
+        token = self._token()
         if not token:
             raise RuntimeError(f"{self.worker}_token_missing")
         return {"Authorization": f"Bearer {token}"}
@@ -634,6 +692,138 @@ PC_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/odysseu
 HERMES_TOKEN_FILE = Path(os.getenv("ODYSSEUS_HERMES_TOKEN_FILE", "/etc/odysseus-hermes-token"))
 VPS_TOKEN_FILE = Path(os.getenv("ODYSSEUS_VPS_WORKER_TOKEN_FILE", "/etc/odysseus-vps-worker-token"))
 
+_AGENT_ADAPTER_TTL = 5.0
+_AGENT_ADAPTER_CACHE: dict[str, Any] = {"registry": {}, "time": 0.0, "loaded": False}
+
+
+def invalidate_agent_adapter_cache() -> None:
+    """Drop the registered-node adapter cache after an endpoint row changes."""
+    _AGENT_ADAPTER_CACHE.update({"registry": {}, "time": 0.0, "loaded": False})
+
+
+def _agent_endpoint_rows() -> list[Any]:
+    """Read registered node-agent rows; best-effort so read paths degrade closed."""
+    try:
+        from core.database import ModelEndpoint, SessionLocal
+    except Exception:
+        return []
+    db = None
+    try:
+        db = SessionLocal()
+        rows = (
+            db.query(ModelEndpoint)
+            .filter(ModelEndpoint.endpoint_kind == AGENT_ENDPOINT_KIND)
+            .all()
+        )
+        return [row for row in rows] if isinstance(rows, (list, tuple)) else []
+    except Exception:
+        return []
+    finally:
+        try:
+            if db is not None:
+                db.close()
+        except Exception:
+            pass
+
+
+def agent_endpoint_adapters() -> dict[str, CodexBridgeAdapter]:
+    """Build codex-bridge adapters for every enabled registered node endpoint.
+
+    Short-TTL cached because adapters() is called on hot paths; invalidate with
+    :func:`invalidate_agent_adapter_cache` after a registration change.
+    """
+    now = time.monotonic()
+    if (
+        _AGENT_ADAPTER_CACHE["loaded"]
+        and (now - float(_AGENT_ADAPTER_CACHE["time"] or 0.0)) < _AGENT_ADAPTER_TTL
+    ):
+        return dict(_AGENT_ADAPTER_CACHE["registry"] or {})
+    registry: dict[str, CodexBridgeAdapter] = {}
+    for row in _agent_endpoint_rows():
+        try:
+            endpoint_id = str(getattr(row, "id", "") or "").strip()
+            base_url = str(getattr(row, "base_url", "") or "").strip().rstrip("/")
+            if not endpoint_id or not base_url:
+                continue
+            worker = agent_worker_id(endpoint_id)
+            registry[worker] = CodexBridgeAdapter(
+                worker,
+                base_url,
+                None,
+                token=str(getattr(row, "api_key", "") or ""),
+                enabled=bool(getattr(row, "is_enabled", False)),
+                machine="Registered node",
+                label=_display_name(getattr(row, "name", ""), worker),
+                workspaces=agent_endpoint_workspaces(row),
+            )
+        except Exception:
+            continue
+    _AGENT_ADAPTER_CACHE.update({"registry": registry, "time": now, "loaded": True})
+    return dict(registry)
+
+
+def ensure_legacy_codex_endpoint() -> bool:
+    """Register the env-configured legacy Codex bridge as a node endpoint once.
+
+    MAD-934 migration: after this row exists, the ``pc-codex`` worker resolves
+    from the endpoint row instead of the fixed environment binding, so the
+    existing chat/voice/task behavior reads the binding as data. Idempotent and
+    best-effort — it never raises into a caller's read path.
+    """
+    if not _enabled("ODYSSEUS_PC_CODEX_ENABLED", False):
+        return False
+    try:
+        from core.database import ModelEndpoint, SessionLocal
+    except Exception:
+        return False
+    db = None
+    try:
+        db = SessionLocal()
+        if db.query(ModelEndpoint).filter(ModelEndpoint.id == LEGACY_CODEX_ENDPOINT_ID).first() is not None:
+            return False
+        base_url = str(
+            os.getenv("ODYSSEUS_PC_CODEX_URL", "http://127.0.0.1:8040") or ""
+        ).strip().rstrip("/")
+        if not base_url:
+            return False
+        from datetime import datetime
+
+        meta = {
+            "protocol": AGENT_BRIDGE_PROTOCOLS[0],
+            "workspaces": list(
+                configured_worker_workspaces().get(LEGACY_CODEX_ENDPOINT_ID, [])
+            ),
+        }
+        row = ModelEndpoint(
+            id=LEGACY_CODEX_ENDPOINT_ID,
+            name=_worker_label("ODYSSEUS_PC_CODEX_LABEL", "PC Codex"),
+            base_url=base_url,
+            api_key=_token(PC_TOKEN_FILE) or None,
+            is_enabled=True,
+            model_type=AGENT_ENDPOINT_KIND,
+            endpoint_kind=AGENT_ENDPOINT_KIND,
+            agent_meta=json.dumps(meta),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        invalidate_agent_adapter_cache()
+        return True
+    except Exception:
+        try:
+            if db is not None:
+                db.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        try:
+            if db is not None:
+                db.close()
+        except Exception:
+            pass
+
 
 def adapters(*, include_external: bool = False) -> dict[str, WorkerAdapter]:
     registry: dict[str, WorkerAdapter] = {
@@ -660,6 +850,10 @@ def adapters(*, include_external: bool = False) -> dict[str, WorkerAdapter]:
             label=_worker_label("ODYSSEUS_VPS_CODEX_LABEL", "VPS Codex"),
         ),
     }
+    # Registered node-agent endpoints are the data-driven source of truth and
+    # override the fixed env slots (the migrated legacy binding keeps the
+    # pc-codex worker id, so existing chat/voice/task bindings still resolve).
+    registry.update(agent_endpoint_adapters())
     if include_external:
         from src.external_agent_bridge import external_agent_adapters
 

@@ -167,6 +167,28 @@ VOICE_WORKSPACES = {
 }
 
 
+def _current_voice_workspaces() -> set[str]:
+    """Workspaces from the live worker catalog, including registered nodes."""
+    try:
+        catalog = worker_catalog()
+    except Exception:
+        return set(VOICE_WORKSPACES)
+    return {
+        workspace
+        for details in catalog.values()
+        for workspace in details.get("workspaces") or []
+    }
+
+
+def _voice_worker_label(worker: str) -> str:
+    """Resolve a worker's display label from the live catalog."""
+    try:
+        details = worker_catalog().get(worker) or {}
+    except Exception:
+        details = {}
+    return str(details.get("label") or WORKER_LABELS.get(worker) or worker)
+
+
 def _worker_command(text: str) -> tuple[str, str, str, str | None, str | None] | None:
     """Parse the original fixed Voice Orb worker command contract.
 
@@ -1482,8 +1504,13 @@ def _runtime_voice_target(endpoint_url: str, model: str) -> str:
 
 def _voice_origin_target(voice_session: dict[str, Any], chat_session: Any = None) -> str:
     saved = str(voice_session.get("origin_target") or "")
-    if saved in ACTIVE_VOICE_TARGETS:
+    if saved in DIRECT_MODEL_TARGETS or saved in WORKER_LABELS:
         return saved
+    try:
+        if saved and saved in worker_catalog():
+            return saved
+    except Exception:
+        pass
     return _runtime_voice_target(
         getattr(chat_session, "endpoint_url", ""),
         getattr(chat_session, "model", ""),
@@ -3261,7 +3288,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
     if selected_target not in DIRECT_MODEL_TARGETS:
         worker = selected_target
         workspace = "vps-ops" if worker == "vps-codex" else ("home-lab" if worker == "hermes" else selected_workspace)
-        label = WORKER_LABELS.get(worker, "Worker")
+        label = _voice_worker_label(worker)
         try:
             task, action = await _dispatch_worker_request(
                 chat_session_id, worker, workspace, text, owner, voice_session,
@@ -3433,7 +3460,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     if selected_target != origin_target and selected_target != "pc-codex":
         resolved = _resolve_voice_target_endpoint(selected_target, owner)
         if not resolved:
-            label = VOICE_TARGET_LABELS.get(selected_target, selected_target)
+            label = _voice_worker_label(selected_target)
             raise RuntimeError(f"{label} voice endpoint is not connected")
         endpoint_url, model, headers = resolved
     context_messages = chat_session.get_context_messages()
@@ -3918,15 +3945,13 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
         payload: VoiceTargetUpdate,
         owner: str = Depends(require_user),
     ):
-        if payload.target not in ACTIVE_VOICE_TARGETS:
-            raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
         if payload.target not in DIRECT_MODEL_TARGETS:
             from src.jarvis_agent import worker_statuses
 
             target_status = (await worker_statuses()).get(payload.target) or {}
             if not target_status.get("enabled"):
                 raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
-        if payload.workspace not in VOICE_WORKSPACES:
+        if payload.workspace not in _current_voice_workspaces():
             raise HTTPException(status_code=400, detail={"message": "Unknown voice workspace"})
         state = _load_state()
         session = _owned_session(state, session_id, owner)
