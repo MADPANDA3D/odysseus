@@ -65,6 +65,7 @@ TOOL_CATEGORIES: Dict[str, str] = {
     "manage_webhooks": "System",
     "manage_tokens": "System",
     "manage_settings": "System",
+    "manage_extensions": "System",
 }
 
 # Email tools run through the bundled email MCP server; the bare names have no

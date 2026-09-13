@@ -956,6 +956,98 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
 
 
 
+# ---------------------------------------------------------------------------
+# Extension capability discovery / on-demand mount (MAD-913)
+# ---------------------------------------------------------------------------
+
+
+async def do_manage_extensions(content: str, owner: Optional[str] = None) -> Dict:
+    """List installed extensions, inspect capabilities, or mount tools for this request."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    action = str(args.get("action") or "list").strip().lower()
+    try:
+        from src.extension_agent_mount import (
+            extension_catalog_rows,
+            inspect_extension,
+            mount_extension_capabilities,
+        )
+        from src.extension_registry import ExtensionRegistry
+
+        registry = ExtensionRegistry()
+
+        if action == "list":
+            rows = extension_catalog_rows(registry)
+            summary = ", ".join(
+                f"{row['name']} ({row['id']}, {'enabled' if row['enabled'] else 'disabled'}, "
+                f"{row['capability_count']} capabilities)"
+                for row in rows
+            ) or "(none installed)"
+            return {
+                "response": f"{len(rows)} installed extension(s): {summary}",
+                "extensions": rows,
+                "count": len(rows),
+                "exit_code": 0,
+            }
+
+        if action == "inspect":
+            extension_id = str(args.get("extension_id") or args.get("id") or "").strip()
+            if not extension_id:
+                return {"error": "extension_id is required for inspect", "exit_code": 1}
+            detail = inspect_extension(registry, extension_id)
+            if detail is None:
+                return {"error": f"Unknown extension: {extension_id}", "exit_code": 1}
+            if not detail["inventory_available"]:
+                return {"error": "extension_inventory_unavailable", "exit_code": 1}
+            listed = ", ".join(
+                f"{item['name']} ({item['kind']}, {item['permission_mode']})"
+                for item in detail["capabilities"]
+            ) or "(no capabilities)"
+            state = "enabled" if detail["enabled"] else "disabled"
+            advice = (
+                "Use action=mount with names to load any of these tools for this request."
+                if detail["mountable"]
+                else "No browserless mountable tools are available for this extension."
+            )
+            return {
+                "response": f"{detail['name']} is {state}; capabilities: {listed}. {advice}",
+                "extension": detail,
+                "capabilities": detail["capabilities"],
+                "count": len(detail["capabilities"]),
+                "exit_code": 0,
+            }
+
+        if action in ("mount", "mount_tools", "load_tools"):
+            raw = args.get("names") or args.get("tools") or []
+            if isinstance(raw, str):
+                raw = [raw]
+            if not isinstance(raw, list):
+                return {"error": "names must be a list", "exit_code": 1}
+            result = mount_extension_capabilities(registry, raw)
+            mounted = result["mounted"]
+            unavailable = result["unavailable"]
+            names = ", ".join(item["name"] for item in mounted) or "(none)"
+            text = f"Mounted extension tools for the rest of this request: {names}."
+            if unavailable:
+                reasons = "; ".join(
+                    f"{item['name']}: {item['error']}" for item in unavailable
+                )
+                text += f" Unavailable: {reasons}."
+            return {
+                "response": text,
+                "mounted_extension_tools": mounted,
+                "unavailable": unavailable,
+                "exit_code": 0,
+            }
+
+        return {"error": f"Unknown action: {action}", "exit_code": 1}
+    except Exception as e:
+        logger.error(f"manage_extensions error: {e}")
+        return {"error": str(e), "exit_code": 1}
+
+
 # ── registry adapters ────────────────────────────────────────────────────────
 def _owner_adapter(fn):
     """Wrap a do_*(content, owner) impl as a registry execute(content, ctx)."""
@@ -970,4 +1062,5 @@ ADMIN_TOOL_HANDLERS = {
     "manage_webhooks": _owner_adapter(do_manage_webhooks),
     "manage_tokens": _owner_adapter(do_manage_tokens),
     "manage_settings": _owner_adapter(do_manage_settings),
+    "manage_extensions": _owner_adapter(do_manage_extensions),
 }

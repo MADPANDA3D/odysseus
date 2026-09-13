@@ -312,6 +312,7 @@ _ADMIN_TOOLS = {
     "manage_webhooks",
     "manage_tokens",
     "manage_settings",
+    "manage_extensions",
     "download_model",
     "serve_model",
     "serve_preset",

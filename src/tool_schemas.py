@@ -827,6 +827,22 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_extensions",
+            "description": "Inspect installed plugins/extensions and their capabilities without activating them, then mount exactly the tools this request needs. Use `list` to see installed extensions (works while disabled), `inspect` with an extension_id for capability names/kinds/permission modes, and `mount` with names to load those extension tools through the existing governed executor for the rest of this request (the exact schemas come back in the result). Disabled extensions are inspectable but not mountable.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "inspect", "mount"]},
+                    "extension_id": {"type": "string", "description": "Extension id for inspect (e.g. 'oracle')."},
+                    "names": {"type": "array", "items": {"type": "string"}, "description": "Capability names to mount for the rest of this request (from inspect)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "download_model",
             "description": "Download a HuggingFace model to a server. If `host` is omitted, defaults to the cookbook's currently-selected server (NOT localhost) — call list_cookbook_servers first if you're unsure where it should go.",
             "parameters": {
@@ -1670,7 +1686,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = action
     elif tool_type in ("manage_tasks", "manage_skills", "api_call",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
-                        "manage_tokens", "manage_documents", "manage_settings"):
+                        "manage_tokens", "manage_documents", "manage_settings",
+                        "manage_extensions"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")

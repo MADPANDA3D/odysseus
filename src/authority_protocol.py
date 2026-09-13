@@ -123,6 +123,7 @@ _DEFAULT_EFFECT_BY_CAPABILITY = {
             "update_plan", "ask_user", "trigger_research", "start_agent_task", "manage_bg_jobs",
             "bash", "python", "download_model", "serve_model", "serve_preset", "adopt_served_model",
             "manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks",
+            "manage_extensions",
         }
     },
     **{
