@@ -27,6 +27,10 @@ let scanStatus;
 let scanTimer = null;
 let scanInFlight = false;
 let scanGeneration = 0;
+let installedPlugins = [];
+let installedSelectedId = null;
+let installedList;
+let installedSummary;
 const SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'report'];
 const SCAN_POLL_INTERVAL_MS = 900;
 
@@ -136,6 +140,130 @@ function renderCards() {
     card.addEventListener('click', () => selectPlugin(plugin.id));
     results.append(card);
   });
+}
+
+function renderInstalled() {
+  if (!installedList) return;
+  installedList.replaceChildren();
+  if (!installedPlugins.length) {
+    installedList.append(element('span', 'marketplace-installed-empty', 'No plugins installed.'));
+    if (installedSummary) installedSummary.textContent = 'Nothing installed yet';
+    return;
+  }
+  if (installedSummary) {
+    installedSummary.textContent = `${installedPlugins.length} plugin${installedPlugins.length === 1 ? '' : 's'}`;
+  }
+  installedPlugins.forEach(plugin => {
+    const row = element('button', `marketplace-installed-row${plugin.origin === 'configured' ? ' is-configured' : ''}`);
+    row.type = 'button';
+    row.dataset.installedId = plugin.id;
+    row.setAttribute('role', 'listitem');
+    row.setAttribute('aria-pressed', String(plugin.id === installedSelectedId));
+    row.append(
+      element('strong', '', plugin.name),
+      element(
+        'span',
+        'marketplace-installed-state',
+        plugin.origin === 'configured'
+          ? 'configured'
+          : `${plugin.state}${plugin.capability_count ? ` · ${plugin.capability_count} cap` : ''}`,
+      ),
+    );
+    row.addEventListener('click', () => selectInstalled(plugin.id));
+    installedList.append(row);
+  });
+}
+
+async function loadInstalled(generation) {
+  try {
+    const payload = await api('/api/extensions/installed');
+    if (generation !== loadGeneration) return;
+    installedPlugins = Array.isArray(payload.plugins) ? payload.plugins : [];
+    renderInstalled();
+  } catch (error) {
+    if (generation !== loadGeneration) return;
+    installedPlugins = [];
+    installedList?.replaceChildren(element('span', 'marketplace-installed-empty', error?.message || 'Installed plugins unavailable.'));
+    if (installedSummary) installedSummary.textContent = 'Unavailable';
+  }
+}
+
+function renderInstalledDetail(payload) {
+  detailContent.replaceChildren();
+  const heading = element('div');
+  heading.append(element('h3', '', `${payload.name}${payload.version ? ` ${payload.version}` : ''}`));
+  const badges = element('div', 'marketplace-detail-badges');
+  badges.append(
+    badge(
+      payload.origin === 'configured' ? 'Configured' : payload.state === 'enabled' ? 'Enabled' : 'Disabled',
+      payload.state === 'disabled' ? 'warning' : 'positive',
+    ),
+    badge(payload.runtime || 'unknown', ''),
+  );
+  heading.append(badges, element('p', '', payload.origin === 'configured' ? 'Configured surface' : 'Installed plugin'));
+  detailContent.append(heading);
+
+  const identity = detailSection('Identity');
+  appendFacts(identity, [
+    ['Origin', payload.origin],
+    ['Runtime', payload.runtime || 'unknown'],
+    ['Descriptor', payload.descriptor || 'unknown'],
+    ['Revision', payload.source_revision || 'not recorded'],
+  ]);
+  detailContent.append(identity);
+
+  const capabilities = detailSection('Capabilities and tools');
+  capabilities.append(listOrNone(
+    payload.capabilities,
+    item => `${item.name} · ${item.kind} · ${item.permission_mode}${item.description ? ` — ${item.description}` : ''}`,
+  ));
+  detailContent.append(capabilities);
+
+  const permissions = detailSection('Permissions');
+  const permissionItems = [`Default: ${payload.permissions?.default || 'unknown'}`];
+  Object.entries(payload.permissions?.capabilities || {}).forEach(([name, mode]) => permissionItems.push(`${name}: ${mode}`));
+  permissions.append(listOrNone(permissionItems, value => value));
+  detailContent.append(permissions);
+
+  const boundaries = detailSection('Data boundaries');
+  const boundary = payload.data_boundaries || {};
+  boundaries.append(listOrNone(
+    ['read', 'write', 'network'].map(kind => `${kind}: ${(boundary[kind] || []).length ? (boundary[kind] || []).join(', ') : 'none'}`),
+    value => value,
+  ));
+  detailContent.append(boundaries);
+
+  const configuration = detailSection('Configuration');
+  configuration.append(listOrNone(
+    payload.configuration,
+    item => `${item.key}${item.required ? ' · required' : ' · optional'}${item.secret ? ' · secret' : ''} — ${item.description}`,
+  ));
+  configuration.append(element('p', 'marketplace-action-status', 'Values live in Settings/Connections; no secret values are shown here.'));
+  detailContent.append(configuration);
+
+  if (payload.notes?.length) {
+    const notes = detailSection('Notes');
+    notes.append(listOrNone(payload.notes, value => value));
+    detailContent.append(notes);
+  }
+}
+
+async function selectInstalled(id, focus = true) {
+  installedSelectedId = id;
+  selectedId = null;
+  renderInstalled();
+  renderCards();
+  try {
+    const payload = await api(`/api/extensions/installed/${encodeURIComponent(id)}`);
+    renderInstalledDetail(payload);
+  } catch (error) {
+    detailContent.replaceChildren();
+    const state = element('div', 'marketplace-state');
+    state.append(element('strong', '', 'Plugin detail unavailable'), element('span', '', error?.message || ''));
+    detailContent.append(state);
+  }
+  workspace.classList.add('has-detail');
+  if (focus) detail.focus();
 }
 
 function appendFacts(container, facts) {
@@ -575,6 +703,8 @@ function selectPlugin(id, focus = true) {
   const plugin = plugins.find(item => item.id === id);
   if (!plugin) return;
   selectedId = id;
+  installedSelectedId = null;
+  renderInstalled();
   renderCards();
   renderDetail(plugin);
   workspace.classList.add('has-detail');
@@ -587,6 +717,7 @@ async function load() {
   workspace.classList.remove('has-detail');
   detailContent.replaceChildren();
   renderState('Loading plugins…', 'Verifying the signed catalog and local registry.');
+  loadInstalled(generation);
   try {
     const response = await fetch(`${API_BASE}/api/extensions/marketplace`, { credentials: 'same-origin' });
     if (!response.ok) throw new Error(`marketplace_http_${response.status}`);
@@ -613,6 +744,7 @@ function open() {
   modal.setAttribute('aria-hidden', 'false');
   search.value = '';
   category.value = '';
+  installedSelectedId = null;
   scanGeneration += 1;
   stopScanPolling();
   scanResults.hidden = true;
@@ -665,6 +797,8 @@ function init() {
   scanPhases = document.getElementById('marketplace-scan-phases');
   scanResults = document.getElementById('marketplace-scan-results');
   scanStatus = document.getElementById('marketplace-scan-status');
+  installedList = document.getElementById('marketplace-installed-list');
+  installedSummary = document.getElementById('marketplace-installed-summary');
   if (!modal || !launcher || !search || !category || !results || !summary || !workspace || !detail || !detailContent) return;
   launcher.addEventListener('click', open);
   document.getElementById('close-marketplace-modal')?.addEventListener('click', close);
