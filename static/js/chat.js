@@ -441,42 +441,141 @@ import { getSelectedAgentSelection } from './modelPicker.js';
   let _queuedDrainTimer = null;
   let _queuedPromoteTimer = null;
   let _queuedRequestSeq = 0;
-  let _queuedBubbleHost = null;
+  let _queuedStrip = null;
+  let _queueOutsideClickBound = false;
 
-  function _escapeQueueText(s) {
-    return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  function _ensureQueuedBubbleHost() {
-    const chatBox = document.getElementById('chat-history');
-    if (!chatBox) return null;
-    if (_queuedBubbleHost && _queuedBubbleHost.isConnected) return _queuedBubbleHost;
-    let host = document.getElementById('chat-queued-bubble-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'chat-queued-bubble-host';
-      host.className = 'chat-queued-bubble-host';
+  function _ensureQueueStrip() {
+    if (_queuedStrip && _queuedStrip.isConnected) return _queuedStrip;
+    const bar = document.querySelector('.chat-input-bar');
+    if (!bar) return null;
+    let strip = document.getElementById('chat-queue-strip');
+    if (!strip) {
+      strip = document.createElement('div');
+      strip.id = 'chat-queue-strip';
+      strip.className = 'chat-queue-strip';
+      strip.setAttribute('aria-label', 'Queued messages');
+      strip.hidden = true;
     }
-    chatBox.appendChild(host);
-    _queuedBubbleHost = host;
-    return host;
+    bar.insertBefore(strip, bar.firstChild);
+    _queuedStrip = strip;
+    _bindQueueOutsideClick();
+    return strip;
   }
 
-  function _createQueuedBubble(item) {
-    const host = _ensureQueuedBubbleHost();
-    if (!host) return null;
-    const wrap = document.createElement('div');
-    wrap.className = 'msg msg-user msg-user-queued';
-    wrap.dataset.queueId = item.id;
-    wrap.title = 'Queued - click to send now and stop the current response';
-    wrap.innerHTML = `<div class="role">You <span class="queued-pill"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>Queued</span></div><div class="body">${_escapeQueueText(item.message)}</div>`;
-    wrap.addEventListener('click', (ev) => {
-      if (ev.target && ev.target.closest && ev.target.closest('button, a, textarea, input')) return;
-      _promoteQueuedRequest(item.id);
+  function _bindQueueOutsideClick() {
+    if (_queueOutsideClickBound) return;
+    _queueOutsideClickBound = true;
+    document.addEventListener('click', (ev) => {
+      if (ev.target && ev.target.closest && ev.target.closest('.chat-queue-item')) return;
+      _closeQueueMenus();
     });
-    host.appendChild(wrap);
-    uiModule.scrollHistory();
-    return wrap;
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') _closeQueueMenus();
+    });
+  }
+
+  function _closeQueueMenus() {
+    document.querySelectorAll('.chat-queue-menu').forEach(menu => { menu.hidden = true; });
+    document.querySelectorAll('.chat-queue-more').forEach(btn => { btn.setAttribute('aria-expanded', 'false'); });
+  }
+
+  function _syncQueueStrip() {
+    const strip = _ensureQueueStrip();
+    if (!strip) return;
+    strip.hidden = _queuedAgentRequests.length === 0;
+  }
+
+  function _autoSizeQueueEdit(input) {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+  }
+
+  function _enterQueueEdit(item) {
+    const card = item.el;
+    if (!card) return;
+    _closeQueueMenus();
+    card.classList.add('chat-queue-item-editing');
+    const input = card.querySelector('.chat-queue-edit-input');
+    if (!input) return;
+    input.value = item.message;
+    _autoSizeQueueEdit(input);
+    const saveBtn = card.querySelector('.chat-queue-save');
+    if (saveBtn) saveBtn.disabled = !input.value.trim();
+    input.focus();
+    if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  function _exitQueueEdit(item, { save = false } = {}) {
+    const card = item.el;
+    if (!card) return;
+    const input = card.querySelector('.chat-queue-edit-input');
+    if (save && input) {
+      const next = String(input.value || '').trim();
+      if (next) {
+        item.message = next;
+        const text = card.querySelector('.chat-queue-text');
+        if (text) text.textContent = next;
+      }
+    }
+    card.classList.remove('chat-queue-item-editing');
+  }
+
+  function _createQueuedCard(item) {
+    const strip = _ensureQueueStrip();
+    if (!strip) return null;
+    const card = document.createElement('div');
+    card.className = 'chat-queue-item';
+    card.dataset.queueId = item.id;
+    card.innerHTML = `<span class="chat-queue-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span><div class="chat-queue-body"><div class="chat-queue-text"></div><textarea class="chat-queue-edit-input" rows="1" aria-label="Edit queued message"></textarea></div><div class="chat-queue-actions"><button type="button" class="chat-queue-steer" title="Send this message now and stop the current response">Steer</button><button type="button" class="chat-queue-save" title="Save changes">Save</button><button type="button" class="chat-queue-cancel" title="Cancel editing">Cancel</button><button type="button" class="chat-queue-more" aria-haspopup="menu" aria-expanded="false" title="More options" aria-label="More options"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></div><div class="chat-queue-menu" role="menu" hidden><button type="button" class="chat-queue-menu-item" role="menuitem" data-queue-action="edit">Edit</button><button type="button" class="chat-queue-menu-item" role="menuitem" data-queue-action="delete">Delete</button></div>`;
+    const textEl = card.querySelector('.chat-queue-text');
+    if (textEl) textEl.textContent = item.message;
+    const steerBtn = card.querySelector('.chat-queue-steer');
+    if (steerBtn) steerBtn.addEventListener('click', () => _promoteQueuedRequest(item.id));
+    const saveBtn = card.querySelector('.chat-queue-save');
+    if (saveBtn) saveBtn.addEventListener('click', () => _exitQueueEdit(item, { save: true }));
+    const cancelBtn = card.querySelector('.chat-queue-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => _exitQueueEdit(item, { save: false }));
+    const moreBtn = card.querySelector('.chat-queue-more');
+    const menu = card.querySelector('.chat-queue-menu');
+    if (moreBtn && menu) {
+      moreBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const wasOpen = !menu.hidden;
+        _closeQueueMenus();
+        menu.hidden = wasOpen;
+        moreBtn.setAttribute('aria-expanded', wasOpen ? 'false' : 'true');
+      });
+    }
+    if (menu) {
+      menu.addEventListener('click', (ev) => {
+        const actionBtn = ev.target && ev.target.closest ? ev.target.closest('[data-queue-action]') : null;
+        if (!actionBtn) return;
+        const action = actionBtn.dataset.queueAction;
+        if (action === 'edit') _enterQueueEdit(item);
+        else if (action === 'delete') _removeQueuedRequest(item.id);
+      });
+    }
+    const input = card.querySelector('.chat-queue-edit-input');
+    if (input) {
+      input.addEventListener('input', () => {
+        _autoSizeQueueEdit(input);
+        const btn = card.querySelector('.chat-queue-save');
+        if (btn) btn.disabled = !input.value.trim();
+      });
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          ev.preventDefault();
+          _exitQueueEdit(item, { save: true });
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault();
+          _exitQueueEdit(item, { save: false });
+        }
+      });
+    }
+    strip.appendChild(card);
+    _syncQueueStrip();
+    return card;
   }
 
   function _removeQueuedRequest(id) {
@@ -484,6 +583,7 @@ import { getSelectedAgentSelection } from './modelPicker.js';
     if (idx < 0) return null;
     const [item] = _queuedAgentRequests.splice(idx, 1);
     if (item && item.el && item.el.parentNode) item.el.remove();
+    _syncQueueStrip();
     return item;
   }
 
@@ -538,9 +638,9 @@ import { getSelectedAgentSelection } from './modelPicker.js';
     const msg = String(message || '').trim();
     if (!msg) return false;
     const item = { id: `q${++_queuedRequestSeq}`, message: msg, createdAt: Date.now(), el: null };
-    item.el = _createQueuedBubble(item);
     _queuedAgentRequests.push(item);
-    try { uiModule.showToast && uiModule.showToast(_queuedAgentRequests.length === 1 ? 'Queued for after this response' : `${_queuedAgentRequests.length} requests queued`); } catch (_) {}
+    item.el = _createQueuedCard(item);
+    _syncQueueStrip();
     return true;
   }
 
