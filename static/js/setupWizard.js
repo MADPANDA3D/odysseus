@@ -1,4 +1,10 @@
 import Storage from './storage.js';
+import {
+  detectProvider,
+  extractProviderCredential,
+  connectDetectedEndpoint,
+  connectResultMessage,
+} from './modelConnect.js';
 
 let API_BASE = '';
 let _handlers = {};
@@ -399,12 +405,69 @@ function renderIdentity(panel, status) {
   panel.append(footer);
 }
 
+const MODEL_PROVIDER_DISPLAY = {
+  llamacpp: 'llama.cpp',
+  lmstudio: 'LM Studio',
+  vllm: 'vLLM',
+  ollama: 'Ollama',
+};
+
+function _refreshModelsInBackground() {
+  try {
+    const pending = window.modelsModule?.refreshModels?.(true);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (_) {
+    /* the wizard status refresh already reflects the connection */
+  }
+}
+
+async function _afterModelConnected(notice) {
+  _notice = notice;
+  await fetchStatus(true);
+  _view = { name: 'home', step: null };
+  await render();
+  _refreshModelsInBackground();
+  window.dispatchEvent(new CustomEvent('ge:model-endpoints-updated'));
+}
+
+function _discoveredBaseUrl(item) {
+  const detected = detectProvider(String(item?.url || ''));
+  return detected && detected.base_url ? detected.base_url : String(item?.url || '').replace(/\/+$/, '');
+}
+
+function _renderDiscoveredRow(item, alreadyAdded, onAdd) {
+  const base = _discoveredBaseUrl(item);
+  const hostPart = base.replace(/^https?:\/\//, '').split('/')[0];
+  const providerDisplay = MODEL_PROVIDER_DISPLAY[item.provider]
+    || (Number(item.port) === 1919 ? 'FreeToken' : 'OpenAI-compatible');
+  const models = Array.isArray(item.models_display) && item.models_display.length
+    ? item.models_display
+    : (Array.isArray(item.models) ? item.models : []);
+
+  const row = el('div', `setup-lane${alreadyAdded ? ' done' : ''}`);
+  const mark = el('span', 'setup-lane-mark', alreadyAdded ? '✓' : '·');
+  mark.setAttribute('aria-hidden', 'true');
+  const copy = el('div', 'setup-lane-copy');
+  copy.append(el('strong', 'setup-lane-label', `${providerDisplay} — ${hostPart}`));
+  copy.append(el('span', 'setup-lane-state', models.length
+    ? `${models.length} model${models.length === 1 ? '' : 's'}: ${models.join(', ')}`
+    : 'No model IDs reported'));
+  row.append(mark, copy);
+
+  const add = el('button', 'setup-lane-action', alreadyAdded ? 'Added' : 'Add');
+  add.type = 'button';
+  add.disabled = alreadyAdded;
+  add.addEventListener('click', () => onAdd({ add, base, providerDisplay, hostPart }));
+  row.append(add);
+  return row;
+}
+
 function renderModel(panel, status) {
   panel.replaceChildren();
   panel.className = 'setup-wizard';
   const head = el('div', 'setup-wizard-head');
   head.append(el('h3', null, 'Give it a brain'));
-  head.append(el('p', null, 'Your assistant thinks through a model engine — a model running on this machine or a hosted API such as OpenRouter or DeepSeek.'));
+  head.append(el('p', null, 'Your assistant thinks through a model engine — a model running on this machine or a hosted API such as OpenRouter or DeepSeek. Paste a key or a server URL, or scan this machine. Settings stay closed.'));
   panel.append(head);
 
   const state = el('div', `setup-lane${status.model?.usable ? ' done' : ''}`);
@@ -418,15 +481,155 @@ function renderModel(panel, status) {
   state.append(mark, copy);
   panel.append(state);
 
-  panel.append(el('p', 'setup-wizard-note', 'Add Models opens the existing manager: choose a provider and paste its API key, or scan for a local server.'));
+  const message = el('p', 'setup-wizard-message');
+  panel.append(message);
+  const setMessage = (text, isError) => {
+    message.textContent = text;
+    message.className = `setup-wizard-message${isError ? ' is-error' : ''}`;
+  };
 
-  const footer = el('div', 'setup-wizard-footer');
-  const open = el('button', 'setup-wizard-primary', 'Open Add Models');
-  open.type = 'button';
-  open.addEventListener('click', () => _openSettings('services'));
-  footer.append(open);
-  footer.append(_backRow(panel));
-  panel.append(footer);
+  const field = el('label', 'setup-wizard-field');
+  field.append(el('span', null, 'Paste an API key or provider URL'));
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.placeholder = 'sk-or-… or http://localhost:11434';
+  field.append(input);
+  panel.append(field);
+
+  const pasteFooter = el('div', 'setup-wizard-footer');
+  const connect = el('button', 'setup-wizard-primary', 'Connect');
+  connect.type = 'button';
+  pasteFooter.append(connect);
+  const scan = el('button', 'setup-wizard-secondary', 'Scan this machine');
+  scan.type = 'button';
+  pasteFooter.append(scan);
+  panel.append(pasteFooter);
+
+  const results = el('div', 'setup-lanes');
+  panel.append(results);
+
+  const skipFooter = el('div', 'setup-wizard-footer');
+  const skip = el('button', 'setup-wizard-secondary', 'Skip for now');
+  skip.type = 'button';
+  skip.addEventListener('click', () => {
+    _notice = 'No problem — connect a model whenever you are ready. Chat needs a model to work.';
+    _view = { name: 'home', step: null };
+    render();
+  });
+  skipFooter.append(skip);
+  skipFooter.append(_backRow(panel));
+  panel.append(skipFooter);
+
+  const submitPasted = async () => {
+    if (_busy) return;
+    const raw = input.value.trim();
+    if (!raw) {
+      setMessage('Paste an API key or a server URL first, then press Connect.', true);
+      return;
+    }
+    const paired = extractProviderCredential(raw);
+    const detected = paired && paired.provider && paired.credential
+      ? { base_url: paired.provider.url, api_key: paired.credential, name: paired.provider.name }
+      : detectProvider(raw);
+    if (!detected) {
+      setMessage("We couldn't recognise that. Paste a provider API key (OpenRouter, OpenAI, Anthropic…) or a server URL such as http://localhost:11434/v1.", true);
+      return;
+    }
+    if (detected.ambiguous) {
+      setMessage("That key could belong to several providers, so we won't guess. Put the provider first — for example deepseek sk-… — then press Connect.", true);
+      return;
+    }
+
+    const label = detected.name || detected.base_url;
+    _busy = true;
+    connect.disabled = true;
+    setMessage(`Testing ${label}…`, false);
+    try {
+      const result = await connectDetectedEndpoint(detected, { apiBase: API_BASE });
+      const outcome = connectResultMessage(result, label);
+      if (outcome.level === 'success') {
+        await _afterModelConnected(outcome.message);
+        return;
+      }
+      setMessage(outcome.message, true);
+    } finally {
+      _busy = false;
+      if (connect.isConnected) connect.disabled = false;
+    }
+  };
+  connect.addEventListener('click', submitPasted);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitPasted();
+    }
+  });
+
+  const addDiscovered = async ({ add, base, providerDisplay, hostPart }) => {
+    if (_busy) return;
+    _busy = true;
+    add.disabled = true;
+    add.textContent = 'Adding…';
+    setMessage(`Adding ${providerDisplay} at ${hostPart}…`, false);
+    const label = `${providerDisplay} (${hostPart})`;
+    try {
+      const result = await connectDetectedEndpoint(
+        { base_url: base, name: label },
+        { apiBase: API_BASE, requireModels: false, skipProbe: false, endpointKind: 'local', refreshMode: 'auto' },
+      );
+      const outcome = connectResultMessage(result, label);
+      if (outcome.level === 'success') {
+        await _afterModelConnected(outcome.message);
+        return;
+      }
+      if (result.failure === 'http_error') {
+        setMessage(`We couldn't connect to ${label}. Make sure the server is still running, then scan again or paste its URL above.`, true);
+      } else {
+        setMessage(outcome.message, true);
+      }
+      add.disabled = false;
+      add.textContent = 'Add';
+    } finally {
+      _busy = false;
+    }
+  };
+
+  let scanning = false;
+  scan.addEventListener('click', async () => {
+    if (scanning || _busy) return;
+    scanning = true;
+    scan.disabled = true;
+    results.replaceChildren();
+    setMessage('Scanning this machine for model servers…', false);
+    try {
+      const [discoverRes, endpointsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/discover`, { credentials: 'same-origin' }),
+        fetch(`${API_BASE}/api/model-endpoints`, { credentials: 'same-origin' }),
+      ]);
+      if (!discoverRes.ok) throw new Error('scan failed');
+      const data = await discoverRes.json();
+      const endpoints = endpointsRes.ok ? await endpointsRes.json() : [];
+      const existingBases = new Set(
+        (Array.isArray(endpoints) ? endpoints : []).map((endpoint) => _discoveredBaseUrl(endpoint))
+      );
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) {
+        setMessage('No local model server found. Start Ollama, LM Studio, vLLM, or llama.cpp on this machine, then scan again — or paste its URL above.', true);
+        return;
+      }
+      setMessage(`Found ${items.length} model server${items.length === 1 ? '' : 's'}. Add the one you want to use.`, false);
+      items.forEach((item) => {
+        results.append(_renderDiscoveredRow(item, existingBases.has(_discoveredBaseUrl(item)), addDiscovered));
+      });
+    } catch (_) {
+      setMessage("We couldn't scan this machine. Check the connection and try again, or paste the server URL above.", true);
+    } finally {
+      scanning = false;
+      scan.disabled = false;
+    }
+  });
 }
 
 async function render() {
