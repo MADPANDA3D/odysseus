@@ -1214,9 +1214,6 @@ if (!window._odyEscExpandGuard) {
   const _isVisible = (m) => !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
   const _promote = (m) => {
     if (!m?.classList?.contains('modal') || !_isVisible(m)) return;
-    // Re-entry guard: setting style.zIndex itself fires the observer that
-    // calls us back. Skip if this element is already pinned to the top
-    // (matches the current counter) so we don't spin into an infinite loop.
     const cur = parseInt(getComputedStyle(m).zIndex, 10) || 0;
     if (cur === _zCounter && cur > topToolWindowZ({ exclude: m })) return;
     const z = nextToolWindowZ({
@@ -1227,13 +1224,32 @@ if (!window._odyEscExpandGuard) {
     _zCounter = Math.max(_zCounter, z);
     if (z !== cur) m.style.setProperty('z-index', String(z), 'important');
   };
+  // Promote on visibility TRANSITIONS only. `_promote` writes an inline
+  // z-index, which fires this same observer again; if every class/style write
+  // on a visible modal promoted it, two visible modals (e.g. a docked Updater
+  // plus Settings) would raise each other once per observer batch forever —
+  // a microtask loop that hard-freezes the tab (#MAD-942). Cosmetic writes on
+  // an already-visible modal, including our own, are ignored.
+  const _wasVisible = new WeakMap();
+  const _trackVisibility = (m) => {
+    if (!m?.classList?.contains('modal')) return;
+    const visible = _isVisible(m);
+    const wasVisible = _wasVisible.get(m) === true;
+    _wasVisible.set(m, visible);
+    if (visible && !wasVisible) _promote(m);
+  };
   new MutationObserver((muts) => {
+    const targets = new Set();
     for (const m of muts) {
-      if (m.type === 'childList') m.addedNodes.forEach(n => n.nodeType === 1 && _promote(n));
-      else if (m.type === 'attributes' && m.target?.classList?.contains('modal')) _promote(m.target);
+      if (m.type === 'childList') m.addedNodes.forEach(n => { if (n.nodeType === 1) targets.add(n); });
+      else if (m.type === 'attributes' && m.target?.classList?.contains('modal')) targets.add(m.target);
     }
+    targets.forEach(_trackVisibility);
   }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
-  document.querySelectorAll('.modal').forEach(_promote);
+  document.querySelectorAll('.modal').forEach((m) => {
+    _wasVisible.set(m, _isVisible(m));
+    _promote(m);
+  });
 
   const pickTopModal = () => {
     const modals = [...document.querySelectorAll('.modal')].filter(_isVisible);
