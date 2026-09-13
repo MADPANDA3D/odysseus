@@ -33,6 +33,7 @@ def test_plugins_sidebar_uses_sanitized_extension_registry_projection():
 
     index = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
     app = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    marketplace = (ROOT / "static" / "js" / "marketplace.js").read_text(encoding="utf-8")
     assert 'id="plugins-section"' in index
     assert 'id="plugins-list"' in index
     assert 'id="add-plugins-btn"' in index
@@ -41,3 +42,11 @@ def test_plugins_sidebar_uses_sanitized_extension_registry_projection():
     assert "/api/extensions/catalog" in app
     assert "marketplaceModule.init" in app
     assert "applyExtensionSurfaceControl" in app
+    # MAD-915: GitHub intake lives inside the existing marketplace modal.
+    assert 'id="marketplace-source-url"' in index
+    assert 'id="marketplace-source-scan"' in index
+    assert 'id="marketplace-scan-phases"' in index
+    assert 'id="marketplace-scan-results"' in index
+    assert "SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'report']" in marketplace
+    assert "/api/extensions/scans" in marketplace
+    assert "/api/extensions/plans/source" in marketplace

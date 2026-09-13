@@ -1729,6 +1729,33 @@
           </label>
           <button type="button" id="marketplace-retry">Refresh</button>
         </div>
+        <section class="marketplace-intake" id="marketplace-intake" aria-label="Add plugin from GitHub">
+          <h4>Add from GitHub</h4>
+          <p>Paste a public repository URL. Pandamonium fetches the pinned revision and scans it statically — capabilities, dependencies, licenses, and findings — before anything is installed.</p>
+          <div class="marketplace-intake-form">
+            <input id="marketplace-source-url" type="url" inputmode="url" placeholder="https://github.com/owner/repo.git" autocomplete="off" aria-label="Repository URL">
+            <input id="marketplace-source-ref" type="text" placeholder="HEAD" autocomplete="off" aria-label="Git ref" value="HEAD">
+            <button type="button" id="marketplace-source-scan">Scan repository</button>
+          </div>
+          <section class="mad-mcp-progress-card marketplace-scan-progress" id="marketplace-scan-progress" data-state="idle" aria-live="polite" hidden>
+            <div class="mad-mcp-progress-copy">
+              <strong id="marketplace-scan-title">Scan</strong>
+              <span id="marketplace-scan-detail"></span>
+              <div class="updater-progress-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="marketplace-scan-fill"></span>
+              </div>
+            </div>
+            <ol class="mad-mcp-phase-list" id="marketplace-scan-phases">
+              <li data-phase="fetch"><span></span>Fetch</li>
+              <li data-phase="classify"><span></span>Classify</li>
+              <li data-phase="extract"><span></span>Extract</li>
+              <li data-phase="audit"><span></span>Audit</li>
+              <li data-phase="report"><span></span>Report</li>
+            </ol>
+          </section>
+          <div class="marketplace-scan-results" id="marketplace-scan-results" hidden></div>
+          <div class="marketplace-scan-status" id="marketplace-scan-status" role="status" aria-live="polite"></div>
+        </section>
         <div id="marketplace-summary" class="marketplace-summary" role="status" aria-live="polite"></div>
         <div id="marketplace-workspace" class="marketplace-workspace">
           <section class="marketplace-results-pane" aria-label="Marketplace plugins">

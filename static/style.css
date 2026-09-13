@@ -43220,6 +43220,31 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   outline-offset: 2px;
 }
 .marketplace-summary { min-height: 16px; font-size: 10px; opacity: .64; }
+.marketplace-intake { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--fg) 11%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--fg) 2.5%, var(--panel, var(--bg))); }
+.marketplace-intake h4 { margin: 0; font-size: 12px; }
+.marketplace-intake > p { margin: 0; font-size: 10px; line-height: 1.5; opacity: .68; }
+.marketplace-intake-form { display: grid; grid-template-columns: minmax(220px, 1.6fr) minmax(90px, .4fr) auto; gap: 8px; }
+.marketplace-intake-form input,
+.marketplace-intake-form button {
+  min-height: 36px;
+  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--panel, var(--bg)));
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 11px;
+}
+.marketplace-intake-form button { cursor: pointer; }
+.marketplace-intake-form input:focus-visible,
+.marketplace-intake-form button:focus-visible { outline: 2px solid var(--accent, var(--red)); outline-offset: 2px; }
+.marketplace-scan-progress { margin: 0; }
+.marketplace-scan-results { display: grid; gap: 8px; }
+.marketplace-scan-status { min-height: 14px; font-size: 10px; opacity: .72; }
+.marketplace-scan-results .marketplace-action-preview { margin-top: 8px; }
+@media (max-width: 720px) {
+  .marketplace-intake-form { grid-template-columns: 1fr; }
+}
 .marketplace-workspace { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(320px, .9fr) minmax(440px, 1.25fr); gap: 12px; }
 .marketplace-results-pane,
 .marketplace-detail {
